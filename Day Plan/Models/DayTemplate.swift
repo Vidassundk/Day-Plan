@@ -8,6 +8,10 @@ import SwiftData
 @Model
 final class DayTemplate {
     @Attribute(.unique) var id: UUID
+
+    @Relationship(deleteRule: .nullify, inverse: \WeekdayAssignment.template)
+    var weekdayAssignments: [WeekdayAssignment] = []
+
     var name: String
 
     // ✅ Default so migration has a value for old rows

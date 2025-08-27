@@ -1,9 +1,4 @@
-//
-//  ContentView.swift
-//  Day Plan
-//
-//  Created by Vidas Sun on 25/08/2025.
-//
+// ContentView.swift
 
 import Foundation
 import SwiftData
@@ -11,19 +6,16 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-
-    // Query for DayTemplates, sorted by name.
     @Query(sort: \DayTemplate.name) private var dayTemplates: [DayTemplate]
 
-    // State to control the presentation of the "Add Template" sheet.
     @State private var isAddingTemplate = false
+    @State private var showWeekSchedule = false  // ✅ NEW
 
     var body: some View {
         NavigationSplitView {
             List {
                 ForEach(dayTemplates) { template in
                     NavigationLink {
-                        // Navigate to a detail view for the selected template.
                         DayTemplateDetailView(template: template)
                     } label: {
                         Text(template.name)
@@ -33,9 +25,17 @@ struct ContentView: View {
             }
             .navigationTitle("Day Templates")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+                // ✅ Open Week Schedule as a sheet (works regardless of nav state)
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showWeekSchedule = true
+                    } label: {
+                        Label(
+                            "Week Schedule", systemImage: "calendar.badge.clock"
+                        )
+                    }
                 }
+                ToolbarItem(placement: .navigationBarTrailing) { EditButton() }
                 ToolbarItem {
                     Button {
                         isAddingTemplate.toggle()
@@ -44,9 +44,11 @@ struct ContentView: View {
                     }
                 }
             }
-            // Present the sheet when isAddingTemplate is true.
             .sheet(isPresented: $isAddingTemplate) {
-                AddDayTemplateView()
+                AddDayTemplateView(showWeekScheduleFromHere: $showWeekSchedule)  // ✅ pass binding
+            }
+            .sheet(isPresented: $showWeekSchedule) {
+                WeekScheduleView()
             }
         } detail: {
             Text("Select a Day Template")
@@ -58,15 +60,7 @@ struct ContentView: View {
             for index in offsets {
                 modelContext.delete(dayTemplates[index])
             }
+            try? modelContext.save()  // ✅ ensure relationship nullification is committed
         }
     }
-}
-
-#Preview {
-    // Preview needs the container configured for all necessary models.
-    let container = try! ModelContainer(
-        for: DayTemplate.self,
-        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
-    return ContentView()
-        .modelContainer(container)
 }

@@ -5,6 +5,11 @@ struct AddDayTemplateView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @Binding var showWeekScheduleFromHere: Bool
+    init(showWeekScheduleFromHere: Binding<Bool> = .constant(false)) {
+        _showWeekScheduleFromHere = showWeekScheduleFromHere
+    }
+
     @State private var name: String = ""
     @State private var startTime: Date = Calendar.current.startOfDay(for: .now)
 

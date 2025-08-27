@@ -10,6 +10,7 @@ struct Day_PlanApp: App {
             DayTemplate.self,
             Plan.self,
             ScheduledPlan.self,
+            WeekdayAssignment.self,
         ])
         let modelConfiguration = ModelConfiguration(
             schema: schema, isStoredInMemoryOnly: false)
