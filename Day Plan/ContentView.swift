@@ -5,57 +5,68 @@
 //  Created by Vidas Sun on 25/08/2025.
 //
 
-import SwiftUI
+import Foundation
 import SwiftData
+import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+
+    // Query for DayTemplates, sorted by name.
+    @Query(sort: \DayTemplate.name) private var dayTemplates: [DayTemplate]
+
+    // State to control the presentation of the "Add Template" sheet.
+    @State private var isAddingTemplate = false
 
     var body: some View {
         NavigationSplitView {
             List {
-                ForEach(items) { item in
+                ForEach(dayTemplates) { template in
                     NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
+                        // Navigate to a detail view for the selected template.
+                        DayTemplateDetailView(template: template)
                     } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+                        Text(template.name)
                     }
                 }
-                .onDelete(perform: deleteItems)
+                .onDelete(perform: deleteTemplates)
             }
+            .navigationTitle("Day Templates")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     EditButton()
                 }
                 ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                    Button {
+                        isAddingTemplate.toggle()
+                    } label: {
+                        Label("Add Template", systemImage: "plus")
                     }
                 }
             }
+            // Present the sheet when isAddingTemplate is true.
+            .sheet(isPresented: $isAddingTemplate) {
+                AddDayTemplateView()
+            }
         } detail: {
-            Text("Select an item")
+            Text("Select a Day Template")
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
+    private func deleteTemplates(offsets: IndexSet) {
         withAnimation {
             for index in offsets {
-                modelContext.delete(items[index])
+                modelContext.delete(dayTemplates[index])
             }
         }
     }
 }
 
 #Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+    // Preview needs the container configured for all necessary models.
+    let container = try! ModelContainer(
+        for: DayTemplate.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    return ContentView()
+        .modelContainer(container)
 }

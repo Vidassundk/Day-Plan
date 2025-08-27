@@ -1,23 +1,22 @@
-//
-//  Day_PlanApp.swift
-//  Day Plan
-//
-//  Created by Vidas Sun on 25/08/2025.
-//
-
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct Day_PlanApp: App {
     var sharedModelContainer: ModelContainer = {
+        // Register all your data models with the schema.
+        // The old 'Item.self' is removed.
         let schema = Schema([
-            Item.self,
+            DayTemplate.self,
+            Plan.self,
+            ScheduledPlan.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let modelConfiguration = ModelConfiguration(
+            schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(
+                for: schema, configurations: [modelConfiguration])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
