@@ -71,39 +71,49 @@ struct TimelineSpineRow: View {
                     let cx = leftColumnWidth / 2
                     let cy = h / 2
 
-                    if status == .past {
-                        // Past: full-height accent spine, no dot
+                    // Decide status buckets
+                    let isPast = (status == .past)
+                    let isActive = (status == .current)
+                    let hasDot = !isPast  // dot only when not past
+
+                    // Where the gap is (if any)
+                    let topEndY: CGFloat = hasDot ? (cy - dotSize / 2) : cy
+                    let bottomStartY: CGFloat = hasDot ? (cy + dotSize / 2) : cy
+
+                    // Colors per segment
+                    let topColor: Color =
+                        isPast
+                        ? .accentColor : (isActive ? .accentColor : separator)
+                    let bottomColor: Color = isPast ? .accentColor : separator
+
+                    // TOP segment (omit when first)
+                    if !isFirst {
                         Path { p in
                             p.move(to: CGPoint(x: cx, y: 0))
+                            p.addLine(to: CGPoint(x: cx, y: topEndY))
+                        }
+                        .stroke(
+                            topColor,
+                            style: StrokeStyle(
+                                lineWidth: lineWidth, lineCap: .round))
+                    }
+
+                    // BOTTOM segment (omit when last)
+                    if !isLast {
+                        Path { p in
+                            p.move(to: CGPoint(x: cx, y: bottomStartY))
                             p.addLine(to: CGPoint(x: cx, y: h))
                         }
-                        .stroke(Color.accentColor, lineWidth: lineWidth)
-                    } else {
-                        // Current/Upcoming: split around the dot
-                        let topColor: Color =
-                            (status == .current) ? .accentColor : separator
-                        let bottomColor: Color = separator
+                        .stroke(
+                            bottomColor,
+                            style: StrokeStyle(
+                                lineWidth: lineWidth, lineCap: .round))
+                    }
 
-                        if !isFirst {
-                            Path { p in
-                                p.move(to: CGPoint(x: cx, y: 0))
-                                p.addLine(
-                                    to: CGPoint(x: cx, y: cy - dotSize / 2))
-                            }
-                            .stroke(topColor, lineWidth: lineWidth)
-                        }
-
-                        if !isLast {
-                            Path { p in
-                                p.move(to: CGPoint(x: cx, y: cy + dotSize / 2))
-                                p.addLine(to: CGPoint(x: cx, y: h))
-                            }
-                            .stroke(bottomColor, lineWidth: lineWidth)
-                        }
-
-                        // Dot only for current/upcoming
+                    // Dot only for current/upcoming (not past)
+                    if hasDot {
                         Circle()
-                            .fill(dotColor)  // current = .accentColor; others = .secondary
+                            .fill(dotColor)  // e.g. current = .accentColor; upcoming = .secondary
                             .frame(width: dotSize, height: dotSize)
                             .position(x: cx, y: cy)
                     }

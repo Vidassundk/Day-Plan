@@ -1,4 +1,6 @@
-// ContentView.swift
+// ContentView.swift (updated)
+// Focus strictly on the timeline; CRUD moved to DayTemplateManagerView.
+// Use direct NavigationLinks (no typed NavigationPath) to avoid path type mismatches.
 
 import Foundation
 import SwiftData
@@ -7,29 +9,24 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
 
-    // Data
-    @Query(sort: \DayTemplate.name) private var dayTemplates: [DayTemplate]
-    @Query private var assignments: [WeekdayAssignment]  // for today’s mapping
-
-    // UI state
-    @State private var isAddingTemplate = false
-    @State private var showWeekSchedule = false
+    // Data used only for today's mapping
+    @Query private var assignments: [WeekdayAssignment]
 
     var body: some View {
-        NavigationSplitView {
+        NavigationStack {
             List {
                 // MARK: Today
                 Section {
                     if let template = todaysTemplate {
                         TodayTimelineView(template: template)
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets())  // edge-to-edge if you want
+                            .listRowInsets(EdgeInsets())
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("No template assigned for today.")
                                 .foregroundStyle(.secondary)
-                            Button {
-                                showWeekSchedule = true
+                            NavigationLink {
+                                WeekScheduleView()
                             } label: {
                                 Label(
                                     "Assign a template",
@@ -38,50 +35,30 @@ struct ContentView: View {
                         }
                     }
                 }
-
-                // MARK: Templates list
-                Section("Day Templates") {
-                    ForEach(dayTemplates) { template in
-                        NavigationLink {
-                            DayTemplateDetailView(template: template)
-                        } label: {
-                            Text(template.name)
-                        }
-                    }
-                    .onDelete(perform: deleteTemplates)
-                }
             }
             .navigationTitle(today.name)
             .toolbar {
-                // Week schedule button
+                // Week schedule (kept here because it affects today’s timeline)
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        showWeekSchedule = true
+                    NavigationLink {
+                        WeekScheduleView()
                     } label: {
                         Label(
                             "Week Schedule", systemImage: "calendar.badge.clock"
                         )
                     }
                 }
-                // Edit / Add
-                ToolbarItem(placement: .navigationBarTrailing) { EditButton() }
-                ToolbarItem {
-                    Button {
-                        isAddingTemplate.toggle()
+                // Navigate to the new Manager screen
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink {
+                        DayTemplateManagerView()
                     } label: {
-                        Label("Add Template", systemImage: "plus")
+                        Label(
+                            "Manage Templates",
+                            systemImage: "list.bullet.rectangle")
                     }
                 }
             }
-            // Sheets
-            .sheet(isPresented: $isAddingTemplate) {
-                AddDayTemplateView(showWeekScheduleFromHere: $showWeekSchedule)
-            }
-            .sheet(isPresented: $showWeekSchedule) {
-                WeekScheduleView()
-            }
-        } detail: {
-            Text("Select a Day Template")
         }
     }
 
@@ -94,59 +71,14 @@ struct ContentView: View {
         return Weekday(rawValue: mondayBased) ?? .monday
     }
 
-    private var todaySectionTitle: String {
-        "Today — \(today.name)"
-    }
-
     private var todaysTemplate: DayTemplate? {
         assignments.first(where: { $0.weekdayRaw == today.rawValue })?.template
-    }
-
-    private func currentOrNextPlan(for template: DayTemplate)
-        -> (current: ScheduledPlan?, next: ScheduledPlan?)
-    {
-        let plans = (template.scheduledPlans ?? []).sorted {
-            $0.startTime < $1.startTime
-        }
-        guard !plans.isEmpty else { return (nil, nil) }
-
-        // Anchor “now” to the same reference day as the template’s schedule
-        let nowAnchored = TimeUtil.anchoredTime(Date(), to: template.startTime)
-
-        for sp in plans {
-            let start = sp.startTime
-            let end = start.addingTimeInterval(sp.duration)
-            if nowAnchored < start {
-                // Next plan hasn’t started yet
-                return (nil, sp)
-            } else if nowAnchored >= start && nowAnchored < end {
-                // We’re in this plan right now; also compute the next if you want
-                // Find next:
-                let idx = plans.firstIndex(where: { $0.id == sp.id }) ?? 0
-                let next = (idx + 1 < plans.count) ? plans[idx + 1] : nil
-                return (sp, next)
-            }
-        }
-        // All plans are in the past
-        return (nil, nil)
-    }
-
-    // MARK: - Mutations
-
-    private func deleteTemplates(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(dayTemplates[index])
-            }
-            try? modelContext.save()  // ensure nullify of WeekdayAssignment.template
-        }
     }
 }
 
 #if DEBUG
     import SwiftUI
     import SwiftData
-
     struct ContentView_FullDemo_Previews: PreviewProvider {
         static var previews: some View {
             // In-memory container for previews
@@ -165,7 +97,7 @@ struct ContentView: View {
             return ContentView()
                 .modelContainer(container)
                 .previewDisplayName(
-                    "ContentView — Rich Workday Timeline (No Overlaps)")
+                    "ContentView — Timeline Only (Push Links)")
         }
 
         /// Seeds a realistic Workday timeline with past / current / upcoming items,
