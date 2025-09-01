@@ -1,8 +1,17 @@
+// PATCH 1/2 — TodayTimelineView.swift
+// Choose ONE primary current item among overlapping "current" plans.
+// The *last* active plan (by start time) is considered primary.
+
 import SwiftData
 import SwiftUI
 
 struct TodayTimelineView: View {
     let template: DayTemplate
+
+    @State private var gutterMode: GutterMode = .auto
+    private enum GutterMode: String, CaseIterable, Hashable {
+        case auto, show, hide
+    }
 
     private var plans: [ScheduledPlan] {
         (template.scheduledPlans ?? []).sorted { $0.startTime < $1.startTime }
@@ -13,13 +22,76 @@ struct TodayTimelineView: View {
     private let tick: TimeInterval = 1
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: tick)) { context in
-            let anchoredNow = TimeUtil.anchoredTime(context.date, to: dayStart)
-            let now = min(max(anchoredNow, dayStart), dayEnd)
+        VStack(alignment: .leading, spacing: 8) {
+            controlRow
 
+            TimelineView(.periodic(from: .now, by: tick)) { context in
+                let anchoredNow = TimeUtil.anchoredTime(
+                    context.date, to: dayStart)
+                let now = min(max(anchoredNow, dayStart), dayEnd)
+
+                // Day completion and gutter visibility
+                let lastEnd =
+                    plans.last.map {
+                        $0.startTime.addingTimeInterval($0.duration)
+                    } ?? dayStart
+                let dayComplete = now >= lastEnd
+                let showSpine: Bool = {
+                    switch gutterMode {
+                    case .show: return true
+                    case .hide: return false
+                    case .auto: return !dayComplete
+                    }
+                }()
+
+                // Primary current index among overlaps (last-starting wins)
+                let activeIndices = plans.indices.filter { i in
+                    let sp = plans[i]
+                    let end = sp.startTime.addingTimeInterval(sp.duration)
+                    return now >= sp.startTime && now < end
+                }
+                let primaryActiveIndex = activeIndices.last
+
+                TimelineList(
+                    plans: plans,
+                    dayStart: dayStart,
+                    now: now,
+                    showSpine: showSpine,
+                    primaryActiveIndex: primaryActiveIndex
+                )
+            }
+        }
+    }
+
+    // MARK: - Pieces
+
+    private var controlRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+            Text("Timeline gutter").font(.subheadline)
+            Spacer(minLength: 8)
+            Picker("", selection: $gutterMode) {
+                Text("Auto").tag(GutterMode.auto)
+                Text("Show").tag(GutterMode.show)
+                Text("Hide").tag(GutterMode.hide)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 240)
+            .accessibilityLabel("Timeline gutter visibility")
+        }
+        .padding(.horizontal)
+    }
+
+    private struct TimelineList: View {
+        let plans: [ScheduledPlan]
+        let dayStart: Date
+        let now: Date
+        let showSpine: Bool
+        let primaryActiveIndex: Int?
+
+        var body: some View {
             if plans.isEmpty {
-                ContentUnavailableView(
-                    "No plans scheduled today", systemImage: "clock")
+                emptyState
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -30,14 +102,30 @@ struct TodayTimelineView: View {
                                 isFirst: i == 0,
                                 isLast: i == plans.count - 1,
                                 dayStart: dayStart,
-                                now: now
+                                now: now,
+                                showSpine: showSpine,
+                                isPrimaryCurrent: (i == primaryActiveIndex)
                             )
-                            .animation(.easeInOut(duration: 0.25), value: now)
                         }
                     }
                     .padding(.vertical, 8)
-
                 }
+            }
+        }
+
+        @ViewBuilder
+        private var emptyState: some View {
+            if #available(iOS 17.0, *) {
+                ContentUnavailableView(
+                    "No plans scheduled today", systemImage: "clock")
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "clock")
+                    Text("No plans scheduled today")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 140)
             }
         }
     }
@@ -51,46 +139,45 @@ struct TodayTimelineView: View {
             let cal = Calendar.current
             let startOfDay = cal.startOfDay(for: .now)
 
-            // Plans
-            let standup = Plan(
+            // Sample Plans (kept minimal here; your real preview seeds much more)
+            let a = Plan(
                 title: "Standup", planDescription: "Sprint 42", emoji: "👥")
-            let design = Plan(
+            let b = Plan(
                 title: "Design Sync", planDescription: "Typography", emoji: "🎨")
-            let lunch = Plan(
+            let c = Plan(
                 title: "Lunch", planDescription: "Chicken salad", emoji: "🥗")
-            let gym = Plan(
+            let d = Plan(
                 title: "Workout", planDescription: "Push day", emoji: "💪")
 
             let plans: [ScheduledPlan] = [
                 .init(
-                    plan: standup,
+                    plan: a,
                     startTime: cal.date(
                         byAdding: .hour, value: 8, to: startOfDay)!,
                     duration: 45 * 60),
                 .init(
-                    plan: design,
+                    plan: b,
                     startTime: cal.date(
                         byAdding: .hour, value: 10, to: startOfDay)!,
                     duration: 75 * 60),
                 .init(
-                    plan: lunch,
+                    plan: c,
                     startTime: cal.date(
                         byAdding: .hour, value: 13, to: startOfDay)!,
                     duration: 60 * 60),
                 .init(
-                    plan: gym,
+                    plan: d,
                     startTime: cal.date(
                         byAdding: .hour, value: 16, to: startOfDay)!,
                     duration: 30 * 60),
             ]
 
-            // Your DayTemplate likely needs a name now:
             let template = DayTemplate(
                 name: "Sample Day", startTime: startOfDay)
             template.scheduledPlans = plans
 
             return TodayTimelineView(template: template)
-                .previewDisplayName("TodayTimelineView")
+                .previewDisplayName("TodayTimelineView — Primary current spine")
         }
     }
 #endif

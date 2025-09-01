@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct Day_PlanApp: App {
+
     var sharedModelContainer: ModelContainer = {
         // Register all your data models with the schema.
         // The old 'Item.self' is removed.
@@ -25,8 +26,9 @@ struct Day_PlanApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView().accentColor(.green)
         }
         .modelContainer(sharedModelContainer)
+
     }
 }
