@@ -36,7 +36,7 @@ struct TimelineSpineRow: View {
     // Layout constants
     private let leftColumnWidth: CGFloat = 28
     private let gapWidth: CGFloat = 12
-    private let dotSize: CGFloat = 10
+    private let dotSize: CGFloat = 12
     private let lineWidth: CGFloat = 2
     private let gutterAnimDuration: Double = 0.32
 
@@ -210,7 +210,7 @@ struct TimelineSpineRow: View {
                     .stroke(
                         topColor,
                         style: StrokeStyle(
-                            lineWidth: lineWidth, lineCap: .round))
+                            lineWidth: lineWidth, lineCap: .butt))
                 } else if treatAsPastForSpine {
                     // Special case: first row + past (or secondary current).
                     // Visually fade in from transparent (top) to accent (at the dot).
@@ -228,7 +228,7 @@ struct TimelineSpineRow: View {
                     .stroke(
                         fade,
                         style: StrokeStyle(
-                            lineWidth: lineWidth, lineCap: .round))
+                            lineWidth: lineWidth, lineCap: .butt))
                 }
 
                 if !isLast {
@@ -239,7 +239,7 @@ struct TimelineSpineRow: View {
                     .stroke(
                         bottomColor,
                         style: StrokeStyle(
-                            lineWidth: lineWidth, lineCap: .round))
+                            lineWidth: lineWidth, lineCap: .butt))
                 } else if treatAsPastForSpine {
                     // Special case: last row + past (or secondary current).
                     // Fade OUT from accent (near the dot) to transparent toward the bottom.
@@ -257,7 +257,7 @@ struct TimelineSpineRow: View {
                     .stroke(
                         fadeOut,
                         style: StrokeStyle(
-                            lineWidth: lineWidth, lineCap: .round))
+                            lineWidth: lineWidth, lineCap: .butt))
                 }
 
                 if showDot {
@@ -287,6 +287,91 @@ struct TimelineSpineRow: View {
             }
         }()
         return title + Text(". ") + state + Text(". ") + time
+    }
+}
+
+struct TimelineGapRow: View {
+    let minutesUntil: Int
+    let showSpine: Bool
+
+    // Match TimelineSpineRow layout
+    private let leftColumnWidth: CGFloat = 28
+    private let gapWidth: CGFloat = 12
+    private let lineWidth: CGFloat = 2
+    private let gutterAnimDuration: Double = 0.32
+
+    @State private var currentGutter: CGFloat = 0
+    private var separator: Color { Color(uiColor: .separator) }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            card
+                .padding(.leading, currentGutter)
+                .animation(
+                    .easeInOut(duration: gutterAnimDuration),
+                    value: currentGutter)
+
+            spine
+                .frame(width: leftColumnWidth, alignment: .center)
+                .opacity(showSpine ? 1 : 0)
+                .offset(x: showSpine ? 0 : -8)
+                .animation(
+                    .easeInOut(duration: gutterAnimDuration), value: showSpine
+                )
+                .accessibilityHidden(!showSpine)
+        }
+        .onAppear {
+            currentGutter = showSpine ? (leftColumnWidth + gapWidth) : 0
+        }
+        .onChange(of: showSpine) { new in
+            withAnimation(.easeInOut(duration: gutterAnimDuration)) {
+                currentGutter = new ? (leftColumnWidth + gapWidth) : 0
+            }
+        }
+    }
+
+    private var card: some View {
+        Text("\(TimeUtil.formatMinutes(minutesUntil)) until next plan")
+            .font(.footnote.weight(.bold))
+            .padding(.vertical, 10)
+            .foregroundColor(.accentColor)
+            .padding(.vertical, 6)
+    }
+
+    private var spine: some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            let cx = max(1, geo.size.width / 2)
+
+            // Base: full separator (continuous), overshoot to overlap adjacent rows
+            Path { p in
+                p.move(to: CGPoint(x: cx, y: 0))
+                p.addLine(to: CGPoint(x: cx, y: h))
+            }
+            .stroke(
+                separator,
+                style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+
+            // Overlay: accent -> transparent (so the base separator shows exactly)
+            let fade = LinearGradient(
+                gradient: Gradient(stops: [
+                    .init(color: .accentColor, location: 0.0),
+                    .init(color: .accentColor.opacity(0), location: 1.0),
+                ]),
+                startPoint: .top,
+                endPoint: .bottom  // fully transparent by mid-height
+            )
+
+            Path { p in
+                p.move(to: CGPoint(x: cx, y: 0))
+                p.addLine(to: CGPoint(x: cx, y: h))
+            }
+            .stroke(
+                fade, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
+            )
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

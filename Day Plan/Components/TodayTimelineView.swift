@@ -23,7 +23,7 @@ struct TodayTimelineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            controlRow
+            //            controlRow  
 
             TimelineView(.periodic(from: .now, by: tick)) { context in
                 let anchoredNow = TimeUtil.anchoredTime(
@@ -106,6 +106,23 @@ struct TodayTimelineView: View {
                                 showSpine: showSpine,
                                 isPrimaryCurrent: (i == primaryActiveIndex)
                             )
+
+                            // Insert an in-between row when NOW is between this plan's end and the next plan's start.
+                            if i < plans.count - 1 {
+                                let next = plans[i + 1]
+                                let end = sp.startTime.addingTimeInterval(
+                                    sp.duration)
+                                if now >= end && now < next.startTime {
+                                    let minsLeft = max(
+                                        0,
+                                        Int(
+                                            next.startTime.timeIntervalSince(
+                                                now) / 60))
+                                    TimelineGapRow(
+                                        minutesUntil: minsLeft,
+                                        showSpine: showSpine)
+                                }
+                            }
                         }
                     }
                     .padding(.vertical, 8)
