@@ -232,130 +232,77 @@ struct TimelineSpineRow: View {
                 }
 
                 // --- BOTTOM SEGMENT ---
-                let px = 0 / UIScreen.main.scale
+                // --- BOTTOM SEGMENT (simplified) ---
+                let px = 0 / UIScreen.main.scale  // set to 0 if you prefer no overshoot
 
                 if isLast {
-                    if isLast {
-                        if status == .past {
-                            // last + past → keep your fade-out to nothing
-                            let fadeOut = LinearGradient(
-                                colors: [
-                                    Color.accentColor,
-                                    Color.accentColor.opacity(0),
-                                ],
-                                startPoint: .center,
-                                endPoint: .bottom
-                            )
-                            Path { p in
-                                p.move(to: CGPoint(x: cx, y: bottomStartY))
-                                p.addLine(to: CGPoint(x: cx, y: h + px))  // overshoot a hair
-                            }
-                            .stroke(
-                                fadeOut,
-                                style: StrokeStyle(
-                                    lineWidth: lineWidth, lineCap: .butt))
-                        } else {
-                            // last + NOT past (upcoming or any current) → draw nothing
-                        }
-                    } else if isActive && isPrimaryCurrent {
-                        // last + primary current → base separator + accent→clear overlay
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            separator,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
-
-                        let fadeActive = LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: .accentColor, location: 0.0),
-                                .init(
-                                    color: .accentColor.opacity(0),
-                                    location: 1.0),
-                            ]),
-                            startPoint: .top, endPoint: .bottom
+                    if status == .past {
+                        // LAST + PAST → fade out accent to transparent
+                        let fadeOut = LinearGradient(
+                            colors: [
+                                Color.accentColor, Color.accentColor.opacity(0),
+                            ],
+                            startPoint: .center, endPoint: .bottom
                         )
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            fadeActive,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
-                    } else if treatAsPastForSpine {
-                        // last + secondary current → solid accent (or keep your prior rule)
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            Color.accentColor,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
-                    } else {
-                        // last + upcoming
                         Path { p in
                             p.move(to: CGPoint(x: cx, y: bottomStartY))
                             p.addLine(to: CGPoint(x: cx, y: h + px))
                         }
                         .stroke(
-                            separator,
+                            fadeOut,
                             style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
+                                lineWidth: lineWidth, lineCap: .butt))
+                    } else {
+                        // LAST + NOT PAST (upcoming or any current) → draw nothing
                     }
+                } else if (status == .current) && isPrimaryCurrent {
+                    // PRIMARY CURRENT (not last) → separator base + accent→clear overlay
+                    Path { p in
+                        p.move(to: CGPoint(x: cx, y: bottomStartY - px))
+                        p.addLine(to: CGPoint(x: cx, y: h + px))
+                    }
+                    .stroke(
+                        separator,
+                        style: StrokeStyle(
+                            lineWidth: lineWidth, lineCap: .butt))
+
+                    let fadeActive = LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: .accentColor, location: 0.0),
+                            .init(
+                                color: .accentColor.opacity(0), location: 1.0),
+                        ]),
+                        startPoint: .center, endPoint: .bottom)
+                    Path { p in
+                        p.move(to: CGPoint(x: cx, y: bottomStartY - px))
+                        p.addLine(to: CGPoint(x: cx, y: h + px))
+                    }
+                    .stroke(
+                        fadeActive,
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
+                    )
+                } else if (status == .past)
+                    || ((status == .current) && !isPrimaryCurrent)
+                {
+                    // PAST or SECONDARY CURRENT (not last) → solid accent
+                    Path { p in
+                        p.move(to: CGPoint(x: cx, y: bottomStartY - px))
+                        p.addLine(to: CGPoint(x: cx, y: h + px))
+                    }
+                    .stroke(
+                        Color.accentColor,
+                        style: StrokeStyle(
+                            lineWidth: lineWidth, lineCap: .butt))
                 } else {
-                    if isActive && isPrimaryCurrent {
-                        // primary current (not last): base separator + accent→clear overlay
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            separator,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
-
-                        let fadeActive = LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: .accentColor, location: 0.0),
-                                .init(
-                                    color: .accentColor.opacity(0),
-                                    location: 1.0),
-                            ]),
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            fadeActive,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
-                    } else if treatAsPastForSpine {
-                        // past/secondary current → solid accent (keep the past look!)
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            Color.accentColor,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
-                    } else {
-                        // upcoming
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            separator,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .round))
+                    // UPCOMING (not last) → separator
+                    Path { p in
+                        p.move(to: CGPoint(x: cx, y: bottomStartY))
+                        p.addLine(to: CGPoint(x: cx, y: h + px))
                     }
+                    .stroke(
+                        separator,
+                        style: StrokeStyle(
+                            lineWidth: lineWidth, lineCap: .butt))
                 }
 
                 if showDot {
