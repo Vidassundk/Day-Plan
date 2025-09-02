@@ -14,7 +14,6 @@ final class DayTemplate {
 
     var name: String
 
-    // ✅ Default so migration has a value for old rows
     var startTime: Date = Calendar.current.startOfDay(for: .now)
 
     @Relationship(deleteRule: .cascade, inverse: \ScheduledPlan.dayTemplate)
@@ -29,5 +28,13 @@ final class DayTemplate {
     // ✅ Makes existing call-sites like DayTemplate(name:) still compile
     convenience init(name: String) {
         self.init(name: name, startTime: Calendar.current.startOfDay(for: .now))
+    }
+}
+
+extension DayTemplate {
+    /// The effective day start = the earliest plan's start if any, else the internal anchor.
+    var dayStart: Date {
+        (scheduledPlans.min(by: { $0.startTime < $1.startTime })?.startTime)
+            ?? startTime
     }
 }

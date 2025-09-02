@@ -15,43 +15,47 @@ struct DayTemplateDetailView: View {
 
     var body: some View {
         Form {
+            // Template name
             Section("Template") {
                 TextField("Name", text: $template.name)
-                DatePicker(
-                    "Start time", selection: $template.startTime,
-                    displayedComponents: .hourAndMinute
-                )
-                .datePickerStyle(.compact)
-                .onChange(of: template.startTime) { _ in
-                    reflowForNewDayStart()
-                    try? modelContext.save()
-                }
             }
 
-            Section {
+            // 🔹 Plans section with title
+            Section("Plans") {
                 if sortedPlans.isEmpty {
                     ContentUnavailableView(
-                        "No plans yet", systemImage: "list.bullet.rectangle"
+                        "No plans yet",
+                        systemImage: "list.bullet.rectangle"
                     )
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 } else {
                     ForEach(sortedPlans) { sp in
                         Button {
                             editing = sp
                         } label: {
-                            PlanRowView(
-                                emoji: sp.plan?.emoji ?? "🧩",
-                                title: sp.plan?.title ?? "Untitled",
-                                description: sp.plan?.planDescription,
-                                start: sp.startTime,
-                                durationSeconds: sp.duration
-                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 8) {
+                                    Text(sp.plan?.emoji ?? "🧩")
+                                    Text(sp.plan?.title ?? "Untitled")
+                                }
+                                Text(rowSubtitle(for: sp))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .foregroundStyle(.primary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.plain)  // keep native label colors
+
                         .contextMenu {
                             Button(role: .destructive) {
-                                modelContext.delete(sp)
-                                try? modelContext.save()
+                                delete(sp)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                delete(sp)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -59,41 +63,41 @@ struct DayTemplateDetailView: View {
                     }
                     .onDelete(perform: delete)
                 }
-            } header: {
-                HStack {
-                    Text("Plans")
-                    Spacer()
-                    Button {
-                        showingAdd = true
-                    } label: {
-                        Label("Add", systemImage: "plus.circle.fill")
-                    }
-                    .buttonStyle(.borderless)
+            }
+
+            // 🔹 Add button moved below the list
+            Section {
+                Button {
+                    showingAdd = true
+                } label: {
+                    Label("Add Plan", systemImage: "plus")
                 }
+                // if you want a centered look:
+                // .frame(maxWidth: .infinity, alignment: .center)
+                // or wrap in HStack { Spacer(); Label(...); Spacer() }
             }
         }
-        .navigationTitle(template.name)
-        .navigationBarTitleDisplayMode(.inline)
+
+        // Add sheet (unchanged)
         .sheet(isPresented: $showingAdd) {
-            AddOrReusePlanSheet(
-                dayStart: template.startTime,
-                earliestStart: earliestAvailableStart(),
-                remainingMinutes: remainingMinutesToday()
-            ) { plan, start, lengthMinutes in
-                let startClamped = max(
-                    TimeUtil.anchoredTime(start, to: template.startTime),
-                    earliestAvailableStart())
-                let minutes = DayScheduleEngine.clampDurationWithinDay(
-                    start: startClamped,
-                    requestedMinutes: lengthMinutes,
-                    day: DayWindow(start: template.startTime))
+            AddOrReusePlanSheet(anchorDay: template.dayStart) {
+                plan, start, lengthMinutes in
+                if template.scheduledPlans.isEmpty {
+                    template.startTime = start
+                }
+                let anchored = TimeUtil.anchoredTime(
+                    start, to: template.startTime)
                 let sp = ScheduledPlan(
-                    plan: plan, startTime: startClamped,
-                    duration: TimeInterval(minutes * 60))
+                    plan: plan,
+                    startTime: anchored,
+                    duration: TimeInterval(lengthMinutes * 60)
+                )
                 sp.dayTemplate = template
                 try? modelContext.save()
             }
         }
+
+        // Edit sheet (unchanged)
         .sheet(item: $editing) { sp in
             EditScheduledPlanSheet(
                 template: template,
@@ -108,24 +112,22 @@ struct DayTemplateDetailView: View {
         .onDisappear { try? modelContext.save() }
     }
 
-    // Helpers via SchedulingKit
+    // MARK: - Helpers
+
+    private func delete(_ sp: ScheduledPlan) {
+        modelContext.delete(sp)
+        try? modelContext.save()
+    }
+
     private var sortedPlans: [ScheduledPlan] {
         (template.scheduledPlans ?? []).sorted { $0.startTime < $1.startTime }
     }
-    private func earliestAvailableStart() -> Date {
-        DayScheduleEngine.earliestAvailableStart(
-            day: DayWindow(start: template.startTime), items: sortedPlans,
-            getStart: { $0.startTime }, getDuration: { $0.duration })
-    }
-    private func remainingMinutesToday() -> Int {
-        DayScheduleEngine.remainingMinutes(
-            day: DayWindow(start: template.startTime), items: sortedPlans,
-            getStart: { $0.startTime }, getDuration: { $0.duration })
-    }
-    private func reflowForNewDayStart() {
-        _ = DayScheduleEngine.reflow(
-            day: DayWindow(start: template.startTime), items: sortedPlans,
-            getStart: { $0.startTime }, getDuration: { $0.duration },
-            setStart: { $0.startTime = $1 }, setDuration: { $0.duration = $1 })
+
+    private func rowSubtitle(for sp: ScheduledPlan) -> String {
+        let start = sp.startTime
+        let end = sp.startTime.addingTimeInterval(sp.duration)
+        let mins = Int(sp.duration / 60)
+        return
+            "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) · \(TimeUtil.formatMinutes(mins))"
     }
 }

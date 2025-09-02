@@ -8,15 +8,16 @@
 import SwiftData
 import SwiftUI
 
+// AddOrReusePlanSheet.swift
+
 struct AddOrReusePlanSheet: View {
     enum Mode: String, CaseIterable {
         case create = "Create New"
         case reuse = "Reuse Existing"
     }
 
-    let dayStart: Date
-    let earliestStart: Date  // computed by parent
-    let remainingMinutes: Int  // minutes left in the 24h window
+    // ⬇️ Simplified inputs
+    let anchorDay: Date
     let onAdd: (_ plan: Plan, _ start: Date, _ lengthMinutes: Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -36,16 +37,14 @@ struct AddOrReusePlanSheet: View {
     @State private var selectedPlanId: UUID?
 
     init(
-        dayStart: Date, earliestStart: Date, remainingMinutes: Int,
+        anchorDay: Date,
         onAdd: @escaping (_ plan: Plan, _ start: Date, _ lengthMinutes: Int) ->
             Void
     ) {
-        self.dayStart = dayStart
-        self.earliestStart = earliestStart
-        self.remainingMinutes = remainingMinutes
+        self.anchorDay = anchorDay
         self.onAdd = onAdd
-        _start = State(initialValue: earliestStart)
-        _lengthMinutes = State(initialValue: max(5, min(30, remainingMinutes)))
+        _start = State(initialValue: anchorDay)  // HH:mm editor needs a stable date
+        _lengthMinutes = State(initialValue: 30)  // default; still min 5 via LengthPicker
     }
 
     var body: some View {
@@ -53,11 +52,8 @@ struct AddOrReusePlanSheet: View {
             Form {
                 Section {
                     Picker("Mode", selection: $mode) {
-                        ForEach(Mode.allCases, id: \.self) {
-                            Text($0.rawValue).tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
+                    }.pickerStyle(.segmented)
                 }
 
                 if mode == .create {
@@ -86,38 +82,22 @@ struct AddOrReusePlanSheet: View {
                 }
 
                 Section("Schedule") {
-                    LabeledContent("Earliest available") {
-                        Text(
-                            earliestStart.formatted(
-                                date: .omitted, time: .shortened)
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("Remaining today") {
-                        Text(TimeUtil.formatMinutes(remainingMinutes))
-                            .foregroundStyle(
-                                remainingMinutes == 0 ? .red : .secondary)
-                    }
+                    // ⛔️ REMOVE the “Earliest available” & “Remaining today” rows.
+                    // (These implied blocking logic.)
 
                     DatePicker(
                         "Start", selection: $start,
                         displayedComponents: .hourAndMinute
                     )
                     .datePickerStyle(.compact)
-                    .onChange(of: start) { val in
-                        let anchored = TimeUtil.anchoredTime(val, to: dayStart)
-                        let minAllowed = max(dayStart, earliestStart)
-                        if anchored < minAllowed { start = minAllowed }
-                    }
+                    // ⛔️ REMOVE clamping in onChange — overlaps and out-of-order are allowed now.
 
                     LengthPicker(
-                        "Length", minutes: $lengthMinutes,
-                        initialMinutes: max(5, min(30, remainingMinutes))
-                    )
-                    .disabled(remainingMinutes <= 0)
+                        "Length", minutes: $lengthMinutes, initialMinutes: 30)
+                    // ⛔️ No disabling based on remaining time.
 
                     let anchoredStart = TimeUtil.anchoredTime(
-                        start, to: dayStart)
+                        start, to: anchorDay)
                     let end = anchoredStart.addingTimeInterval(
                         TimeInterval(lengthMinutes * 60))
                     LabeledContent("Will run") {
@@ -125,13 +105,6 @@ struct AddOrReusePlanSheet: View {
                             "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) (\(TimeUtil.formatMinutes(lengthMinutes)))"
                         )
                         .foregroundStyle(.secondary)
-                    }
-
-                    if remainingMinutes <= 0 {
-                        Text(
-                            "No time left in today's 24-hour cycle from the schedule start."
-                        )
-                        .font(.footnote).foregroundStyle(.red)
                     }
                 }
             }
@@ -142,16 +115,9 @@ struct AddOrReusePlanSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let clampedStart = max(
-                            TimeUtil.anchoredTime(start, to: dayStart),
-                            max(dayStart, earliestStart)
-                        )
-                        let clampedLen =
-                            DayScheduleEngine.clampDurationWithinDay(
-                                start: clampedStart,
-                                requestedMinutes: lengthMinutes,
-                                day: DayWindow(start: dayStart)
-                            )
+                        // ✅ No length/start clamps. Just anchor HH:mm to a stable date for storage.
+                        let anchoredStart = TimeUtil.anchoredTime(
+                            start, to: anchorDay)
 
                         let plan: Plan
                         switch mode {
@@ -173,10 +139,10 @@ struct AddOrReusePlanSheet: View {
                             plan = allPlans.first { $0.id == selectedPlanId! }!
                         }
 
-                        onAdd(plan, clampedStart, clampedLen)
+                        onAdd(plan, anchoredStart, lengthMinutes)
                         dismiss()
                     }
-                    .disabled(!canAdd || remainingMinutes < 5)
+                    .disabled(!canAdd)  // only gate on having a plan/title selected
                 }
             }
         }
