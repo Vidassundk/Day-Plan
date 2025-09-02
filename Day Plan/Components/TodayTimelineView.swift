@@ -23,7 +23,7 @@ struct TodayTimelineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            //            controlRow  
+            //            controlRow
 
             TimelineView(.periodic(from: .now, by: tick)) { context in
                 let anchoredNow = TimeUtil.anchoredTime(
@@ -95,6 +95,19 @@ struct TodayTimelineView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
+                        // NEW: pre-first gap row
+                        if let first = plans.first, now < first.startTime {
+                            let minsLeft = max(
+                                0,
+                                Int(first.startTime.timeIntervalSince(now) / 60)
+                            )
+                            TimelineGapRow(
+                                minutesUntil: minsLeft,
+                                showSpine: showSpine,
+                                kind: .beforeFirst
+                            )
+                        }
+
                         ForEach(plans.indices, id: \.self) { i in
                             let sp = plans[i]
                             TimelineSpineRow(

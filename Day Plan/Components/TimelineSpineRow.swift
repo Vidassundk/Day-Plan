@@ -251,17 +251,12 @@ struct TimelineSpineRow: View {
 
                 } else {
                     // first + upcoming → clear → separator
-                    let fadeSep = LinearGradient(
-                        colors: [separator.opacity(0), separator],
-                        startPoint: .top,
-                        endPoint: .center
-                    )
                     Path { p in
                         p.move(to: CGPoint(x: cx, y: 0))
                         p.addLine(to: CGPoint(x: cx, y: topEndY))
                     }
                     .stroke(
-                        fadeSep,
+                        separator,
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
                     )
                 }
@@ -423,9 +418,12 @@ struct TimelineSpineRow: View {
     }
 }
 
+enum TimelineGapKind { case between, beforeFirst }
+
 struct TimelineGapRow: View {
     let minutesUntil: Int
     let showSpine: Bool
+    let kind: TimelineGapKind  // NEW
 
     // Match TimelineSpineRow layout
     private let leftColumnWidth: CGFloat = 28
@@ -435,6 +433,12 @@ struct TimelineGapRow: View {
 
     @State private var currentGutter: CGFloat = 0
     private var separator: Color { Color(uiColor: .separator) }
+
+    init(minutesUntil: Int, showSpine: Bool, kind: TimelineGapKind = .between) {
+        self.minutesUntil = minutesUntil
+        self.showSpine = showSpine
+        self.kind = kind
+    }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -464,44 +468,67 @@ struct TimelineGapRow: View {
     }
 
     private var card: some View {
-        Text("\(TimeUtil.formatMinutes(minutesUntil)) until next plan")
+        let label =
+            (kind == .beforeFirst) ? "until schedule starts" : "until next plan"
+        return Text("\(TimeUtil.formatMinutes(minutesUntil)) \(label)")
             .font(.footnote.weight(.bold))
             .padding(.vertical, 10)
             .foregroundColor(.accentColor)
             .padding(.vertical, 6)
     }
 
+    @ViewBuilder
     private var spine: some View {
         GeometryReader { geo in
             let h = geo.size.height
             let cx = max(1, geo.size.width / 2)
 
-            // Base: full separator (continuous), overshoot to overlap adjacent rows
-            Path { p in
-                p.move(to: CGPoint(x: cx, y: 0))
-                p.addLine(to: CGPoint(x: cx, y: h))
-            }
-            .stroke(
-                separator,
-                style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+            switch kind {
+            case .between:
+                // Base: full separator line
+                Path { p in
+                    p.move(to: CGPoint(x: cx, y: 0))
+                    p.addLine(to: CGPoint(x: cx, y: h))
+                }
+                .stroke(
+                    separator,
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
 
-            // Overlay: accent -> transparent (so the base separator shows exactly)
-            let fade = LinearGradient(
-                gradient: Gradient(stops: [
-                    .init(color: .accentColor, location: 0.0),
-                    .init(color: .accentColor.opacity(0), location: 1.0),
-                ]),
-                startPoint: .top,
-                endPoint: .bottom  // fully transparent by mid-height
-            )
+                // Overlay: accent → transparent (top-to-bottom), same as before
+                let fadeAccent = LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .accentColor, location: 0.0),
+                        .init(color: .accentColor.opacity(0), location: 1.0),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                Path { p in
+                    p.move(to: CGPoint(x: cx, y: 0))
+                    p.addLine(to: CGPoint(x: cx, y: h))
+                }
+                .stroke(
+                    fadeAccent,
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
 
-            Path { p in
-                p.move(to: CGPoint(x: cx, y: 0))
-                p.addLine(to: CGPoint(x: cx, y: h))
+            case .beforeFirst:
+                // NEW: transparent → separator (top-to-bottom)
+                let fadeSeparatorIn = LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: separator.opacity(0), location: 0.0),
+                        .init(color: separator, location: 1.0),
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                Path { p in
+                    p.move(to: CGPoint(x: cx, y: 0))
+                    p.addLine(to: CGPoint(x: cx, y: h))
+                }
+                .stroke(
+                    fadeSeparatorIn,
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
             }
-            .stroke(
-                fade, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
-            )
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
