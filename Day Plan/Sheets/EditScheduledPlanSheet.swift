@@ -35,27 +35,17 @@ struct EditScheduledPlanSheet: View {
         _selectedPlanId = State(initialValue: planToEdit.plan?.id)
         _start = State(initialValue: planToEdit.startTime)
         _lengthMinutes = State(
-            initialValue: max(5, Int(planToEdit.duration / 60)))
+            initialValue: max(5, Int(planToEdit.duration / 60))
+        )
     }
 
     var body: some View {
-        let sorted = (template.scheduledPlans ?? []).sorted {
-            $0.startTime < $1.startTime
-        }
-        let idx = sorted.firstIndex(where: { $0.id == planToEdit.id }) ?? 0
-
-        let prevEnd =
-            idx == 0
-            ? template.startTime
-            : sorted[idx - 1].startTime.addingTimeInterval(
-                sorted[idx - 1].duration)
-
-        let dayEnd = template.startTime.addingTimeInterval(24 * 60 * 60)
-        let nextStart =
-            idx + 1 < sorted.count ? sorted[idx + 1].startTime : dayEnd
+        // 24h window anchored at the Whole schedule start (template.startTime)
+        let day = DayWindow(start: template.dayStart)
 
         NavigationStack {
             Form {
+                // MARK: Plan
                 Section("Plan") {
                     Picker("Reusable plan", selection: $selectedPlanId) {
                         ForEach(allPlans) { p in
@@ -65,45 +55,47 @@ struct EditScheduledPlanSheet: View {
                     .pickerStyle(.navigationLink)
                 }
 
+                // MARK: Schedule
                 Section("Schedule") {
-                    LabeledContent("Allowed window") {
-                        Text(
-                            "\(prevEnd.formatted(date: .omitted, time: .shortened)) – \(nextStart.formatted(date: .omitted, time: .shortened))"
-                        )
-                        .foregroundStyle(.secondary)
-                    }
+                    // NOTE: Removed the "Allowed window" readout entirely.
 
                     DatePicker(
-                        "Start", selection: $start,
+                        "Start",
+                        selection: $start,
                         displayedComponents: .hourAndMinute
                     )
                     .datePickerStyle(.compact)
-                    .onChange(of: start) { value in
+                    .onChange(of: start) { newValue in
                         let anchored = TimeUtil.anchoredTime(
-                            value, to: template.startTime)
-                        if anchored < prevEnd { start = prevEnd }
-                        if anchored > nextStart { start = nextStart }
+                            newValue, to: template.dayStart)
+                        start = anchored
+                        lengthMinutes =
+                            DayScheduleEngine.clampDurationWithinDay(
+                                start: anchored,
+                                requestedMinutes: lengthMinutes,
+                                day: day
+                            )
                     }
 
                     LengthPicker(
-                        "Length", minutes: $lengthMinutes,
+                        "Length",
+                        minutes: $lengthMinutes,
                         initialMinutes: max(5, lengthMinutes)
                     )
                     .onChange(of: lengthMinutes) { mins in
-                        // Ensure length fits in window; if not, clamp it
-                        let anchoredStart = max(
-                            TimeUtil.anchoredTime(
-                                start, to: template.startTime), prevEnd)
-                        let maxAllowed = Int(
-                            nextStart.timeIntervalSince(anchoredStart) / 60)
-                        if mins > maxAllowed {
-                            lengthMinutes = max(0, maxAllowed)
-                        }
+                        let anchoredStart = TimeUtil.anchoredTime(
+                            start, to: template.dayStart)
+                        lengthMinutes =
+                            DayScheduleEngine.clampDurationWithinDay(
+                                start: anchoredStart,
+                                requestedMinutes: mins,
+                                day: day
+                            )
                     }
 
-                    let anchoredStart = max(
-                        TimeUtil.anchoredTime(start, to: template.startTime),
-                        prevEnd)
+                    // Preview the effective run
+                    let anchoredStart = TimeUtil.anchoredTime(
+                        start, to: template.startTime)
                     let end = anchoredStart.addingTimeInterval(
                         TimeInterval(lengthMinutes * 60))
                     LabeledContent("Will run") {
@@ -135,21 +127,23 @@ struct EditScheduledPlanSheet: View {
                         }) {
                             planToEdit.plan = p
                         }
-                        let startClamped = max(
-                            TimeUtil.anchoredTime(
-                                start, to: template.startTime), prevEnd)
-                        planToEdit.startTime = startClamped
 
-                        let maxAllowed = nextStart.timeIntervalSince(
-                            startClamped)
-                        planToEdit.duration = min(
-                            maxAllowed, TimeInterval(max(5, lengthMinutes) * 60)
+                        let startAnchored = TimeUtil.anchoredTime(
+                            start, to: template.dayStart)
+                        planToEdit.startTime = startAnchored
+
+                        let clamped = DayScheduleEngine.clampDurationWithinDay(
+                            start: startAnchored,
+                            requestedMinutes: max(5, lengthMinutes),
+                            day: day
                         )
+                        planToEdit.duration = TimeInterval(clamped * 60)
 
                         onSaved()
                         dismiss()
                     }
-                    .disabled(selectedPlanId == nil || nextStart <= prevEnd)
+                    // No more prev/next window rule; only disable if you want to force choosing a plan.
+                    //.disabled(selectedPlanId == nil)
                 }
             }
         }

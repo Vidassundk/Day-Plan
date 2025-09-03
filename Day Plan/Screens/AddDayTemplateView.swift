@@ -1,6 +1,10 @@
 import SwiftData
 import SwiftUI
 
+/// Add a new Day Template with free-form plan times.
+/// - No "available time" calculations
+/// - No reflowing when start changes
+/// - The only constraint: for each draft, `start + length` must be <= dayStart + 24h.
 struct AddDayTemplateView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -11,30 +15,36 @@ struct AddDayTemplateView: View {
     }
 
     @State private var name: String = ""
+    /// "Whole schedule start" anchor; the 24h window is [startTime, startTime + 24h)
     @State private var startTime: Date = Calendar.current.startOfDay(for: .now)
 
     @State private var drafts: [PlanEntryDraft] = []
-    @State private var showingQuickAdd = false
+
+    @Query(sort: \Plan.title) private var allPlans: [Plan]
+
+    // Add plan sheet state
+    @State private var showAddSheet = false
+    @State private var addMode: AddPlanMode = .reuse
+    @State private var newPlanTitle: String = ""
+    @State private var newPlanEmoji: String = "🧩"
+    @State private var selectedPlanId: UUID?
+    @State private var sheetStart: Date = Calendar.current.startOfDay(for: .now)
+    @State private var sheetLength: Int = 60
 
     var body: some View {
+        let day = DayWindow(start: startTime)
+
         NavigationStack {
             Form {
+                // MARK: Template
                 Section("Template") {
-                    TextField("Template Name", text: $name)
+                    TextField("Name", text: $name)
+                        .textInputAutocapitalization(.words)
 
-                    DatePicker(
-                        "Start time",
-                        selection: $startTime,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    .onChange(of: startTime) { _ in
-                        // If Day Start changes, push all drafts forward to remain valid
-                        reflowDraftsForNewDayStart()
-                    }
                 }
 
-                Section {
+                // MARK: Plans
+                Section("Plans") {
                     if drafts.isEmpty {
                         ContentUnavailableView(
                             "No plans yet", systemImage: "list.bullet.rectangle"
@@ -42,49 +52,21 @@ struct AddDayTemplateView: View {
                         .frame(maxWidth: .infinity)
                     } else {
                         ForEach(sortedDrafts()) { draft in
-                            HStack(spacing: 12) {
-                                Text(
-                                    draft.existingPlan.emoji.isEmpty
-                                        ? "🧩" : draft.existingPlan.emoji
-                                )
-                                .font(.title3)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(draft.existingPlan.title).font(.body)
-
-                                    if let desc = draft.existingPlan
-                                        .planDescription, !desc.isEmpty
-                                    {
-                                        Text(desc).foregroundStyle(.secondary)
-                                            .font(.caption)
-                                    }
-
-                                    // Preview start–end and length
-                                    let anchoredStart = TimeUtil.anchoredTime(
-                                        draft.start, to: startTime)
-                                    let end = anchoredStart.addingTimeInterval(
-                                        TimeInterval(draft.lengthMinutes * 60))
-                                    Text(
-                                        "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) (\(TimeUtil.formatMinutes(draft.lengthMinutes)))"
-                                    )
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                            }
+                            draftRow(draft: draft, day: day)
                         }
-                        .onDelete { drafts.remove(atOffsets: $0) }
+                        .onDelete(perform: deleteDrafts)
                     }
-                } header: {
-                    HStack {
-                        Text("Plans for this day")
-                        Spacer()
-                        Button {
-                            showingQuickAdd = true
-                        } label: {
-                            Label("Add", systemImage: "plus.circle.fill")
-                        }
-                        .buttonStyle(.borderless)
+
+                    Button {
+                        showAddSheet = true
+                        addMode = .reuse
+                        newPlanTitle = ""
+                        newPlanEmoji = "🧩"
+                        selectedPlanId = allPlans.first?.id
+                        sheetStart = TimeUtil.anchoredTime(.now, to: startTime)
+                        sheetLength = 60
+                    } label: {
+                        Label("Add Plan", systemImage: "plus")
                     }
                 }
             }
@@ -94,34 +76,220 @@ struct AddDayTemplateView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: saveTemplate)
-                        .disabled(
-                            name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Save") { saveTemplate() }
+                        .disabled(drafts.isEmpty)
                 }
             }
-            .sheet(isPresented: $showingQuickAdd) {
-                QuickAddPlanSheet(
-                    dayStart: startTime,
-                    earliestStart: earliestAvailableStart(),
-                    remainingMinutes: remainingMinutesToday(),
-                    onAdd: { drafts.append($0) }
+            .sheet(isPresented: $showAddSheet) {
+                addPlanSheet(day: day)
+            }
+        }
+    }
+
+    // MARK: - Rows
+
+    private func draftRow(draft: PlanEntryDraft, day: DayWindow) -> some View {
+        // Binding helpers to mutate the specific draft in place
+        let idx = drafts.firstIndex(where: { $0.id == draft.id })!
+
+        return HStack(spacing: 12) {
+            Text(
+                draft.existingPlan.emoji.isEmpty
+                    ? "🧩" : draft.existingPlan.emoji
+            )
+            .font(.title3)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(
+                    draft.existingPlan.title.isEmpty
+                        ? "Untitled" : draft.existingPlan.title)
+
+                // Timing display (anchored + clamped preview)
+                let anchoredStart = TimeUtil.anchoredTime(
+                    draft.start, to: day.start)
+                let clampedLen = DayScheduleEngine.clampDurationWithinDay(
+                    start: anchoredStart,
+                    requestedMinutes: drafts[idx].lengthMinutes,
+                    day: day
+                )
+                let end = anchoredStart.addingTimeInterval(
+                    TimeInterval(clampedLen * 60))
+
+                Text(
+                    "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) · \(TimeUtil.formatMinutes(clampedLen))"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                // Editors
+                DatePicker(
+                    "Start",
+                    selection: Binding(
+                        get: { drafts[idx].start },
+                        set: { newValue in
+                            let anchored = TimeUtil.anchoredTime(
+                                newValue, to: day.start)
+                            drafts[idx].start = anchored
+                            drafts[idx].lengthMinutes =
+                                DayScheduleEngine.clampDurationWithinDay(
+                                    start: anchored,
+                                    requestedMinutes: drafts[idx].lengthMinutes,
+                                    day: day
+                                )
+                        }
+                    ),
+                    displayedComponents: .hourAndMinute
+                )
+                .datePickerStyle(.compact)
+
+                LengthPicker(
+                    "Length",
+                    minutes: Binding(
+                        get: { drafts[idx].lengthMinutes },
+                        set: { newLen in
+                            drafts[idx].lengthMinutes =
+                                DayScheduleEngine.clampDurationWithinDay(
+                                    start: TimeUtil.anchoredTime(
+                                        drafts[idx].start, to: day.start),
+                                    requestedMinutes: newLen,
+                                    day: day
+                                )
+                        }
+                    ),
+                    initialMinutes: max(5, drafts[idx].lengthMinutes)
                 )
             }
         }
     }
 
-    // MARK: - Persist DayTemplate + all scheduled plans
+    // MARK: - Add Plan Sheet
+
+    private func addPlanSheet(day: DayWindow) -> some View {
+        NavigationStack {
+            Form {
+                Picker("Mode", selection: $addMode) {
+                    Text("Reuse plan").tag(AddPlanMode.reuse)
+                    Text("Create new plan").tag(AddPlanMode.new)
+                }
+                .pickerStyle(.segmented)
+
+                if addMode == .reuse {
+                    Section("Pick a plan") {
+                        Picker("Reusable plan", selection: $selectedPlanId) {
+                            ForEach(allPlans) { p in
+                                Text("\(p.emoji) \(p.title)").tag(
+                                    Optional(p.id))
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                    }
+                } else {
+                    Section("New plan") {
+                        TextField("Title", text: $newPlanTitle)
+                        TextField("Emoji", text: $newPlanEmoji)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                }
+
+                Section("Timing") {
+                    DatePicker(
+                        "Start",
+                        selection: $sheetStart,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .datePickerStyle(.compact)
+                    .onChange(of: sheetStart) { newValue in
+                        sheetStart = TimeUtil.anchoredTime(
+                            newValue, to: day.start)
+                        sheetLength = DayScheduleEngine.clampDurationWithinDay(
+                            start: sheetStart,
+                            requestedMinutes: sheetLength,
+                            day: day
+                        )
+                    }
+
+                    LengthPicker(
+                        "Length",
+                        minutes: $sheetLength,
+                        initialMinutes: max(5, sheetLength)
+                    )
+                    .onChange(of: sheetLength) { newLen in
+                        sheetLength = DayScheduleEngine.clampDurationWithinDay(
+                            start: TimeUtil.anchoredTime(
+                                sheetStart, to: day.start),
+                            requestedMinutes: newLen,
+                            day: day
+                        )
+                    }
+                }
+            }
+            .navigationTitle("Add Plan")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { showAddSheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let anchoredStart = TimeUtil.anchoredTime(
+                            sheetStart, to: day.start)
+                        let clamped = DayScheduleEngine.clampDurationWithinDay(
+                            start: anchoredStart,
+                            requestedMinutes: sheetLength,
+                            day: day
+                        )
+
+                        switch addMode {
+                        case .reuse:
+                            guard let id = selectedPlanId,
+                                let plan = allPlans.first(where: { $0.id == id }
+                                )
+                            else { return }
+                            drafts.append(
+                                PlanEntryDraft(
+                                    existingPlan: plan, start: anchoredStart,
+                                    lengthMinutes: clamped
+                                ))
+
+                        case .new:
+                            let title = newPlanTitle.trimmingCharacters(
+                                in: .whitespacesAndNewlines)
+                            let plan = Plan(
+                                title: title.isEmpty ? "Untitled" : title,
+                                planDescription: nil,
+                                emoji: newPlanEmoji.isEmpty ? "🧩" : newPlanEmoji
+                            )
+                            modelContext.insert(plan)
+                            try? modelContext.save()
+                            drafts.append(
+                                PlanEntryDraft(
+                                    existingPlan: plan, start: anchoredStart,
+                                    lengthMinutes: clamped
+                                ))
+                        }
+
+                        showAddSheet = false
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Save
+
     private func saveTemplate() {
-        let template = DayTemplate(name: name, startTime: startTime)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let template = DayTemplate(
+            name: trimmed.isEmpty ? "New Day" : trimmed,
+            startTime: startTime
+        )
         modelContext.insert(template)
 
         let day = DayWindow(start: template.startTime)
 
-        for draft in sortedDrafts() {
-            let start = max(
-                TimeUtil.anchoredTime(draft.start, to: day.start), day.start)
-            guard start < day.end else { continue }
-
+        for draft in drafts {
+            let start = TimeUtil.anchoredTime(
+                draft.start, to: template.startTime)
             let minutes = DayScheduleEngine.clampDurationWithinDay(
                 start: start,
                 requestedMinutes: draft.lengthMinutes,
@@ -134,259 +302,33 @@ struct AddDayTemplateView: View {
                 duration: TimeInterval(minutes * 60)
             )
             scheduled.dayTemplate = template
+            modelContext.insert(scheduled)
         }
 
         try? modelContext.save()
         dismiss()
     }
 
-    // MARK: - Timing helpers (via SchedulingKit)
+    // MARK: - Helpers
 
-    /// Current drafts sorted by anchored start within this Day.
     private func sortedDrafts() -> [PlanEntryDraft] {
-        drafts.sorted {
-            TimeUtil.anchoredTime($0.start, to: startTime)
-                < TimeUtil.anchoredTime($1.start, to: startTime)
+        drafts.sorted { a, b in
+            TimeUtil.anchoredTime(a.start, to: startTime)
+                < TimeUtil.anchoredTime(b.start, to: startTime)
         }
     }
 
-    /// Earliest slot available: end of last scheduled draft (or day start if none).
-    private func earliestAvailableStart() -> Date {
-        DayScheduleEngine.earliestAvailableStart(
-            day: DayWindow(start: startTime),
-            items: drafts,
-            getStart: { $0.start },
-            getDuration: { TimeInterval($0.lengthMinutes * 60) }
-        )
-    }
-
-    /// Minutes remaining in this 24h cycle (from Day start).
-    private func remainingMinutesToday() -> Int {
-        DayScheduleEngine.remainingMinutes(
-            day: DayWindow(start: startTime),
-            items: drafts,
-            getStart: { $0.start },
-            getDuration: { TimeInterval($0.lengthMinutes * 60) }
-        )
-    }
-
-    /// When Day Start changes, enforce:
-    ///  - first draft starts >= day start
-    ///  - each next starts >= previous end
-    ///  - clamp to 24h window
-    private func reflowDraftsForNewDayStart() {
-        drafts = DayScheduleEngine.reflow(
-            day: DayWindow(start: startTime),
-            items: drafts,
-            getStart: { $0.start },
-            getDuration: { TimeInterval($0.lengthMinutes * 60) },
-            setStart: { $0.start = $1 },
-            setDuration: { $0.lengthMinutes = Int($1 / 60) }
-        )
-    }
-}
-
-// MARK: - Quick Add Sheet with validation & 24h cap
-private struct QuickAddPlanSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-
-    enum Mode: String, CaseIterable {
-        case create = "Create New"
-        case reuse = "Reuse Existing"
-    }
-
-    let dayStart: Date
-    let earliestStart: Date  // computed by parent from existing drafts
-    let remainingMinutes: Int  // minutes left in this 24h window
-    let onAdd: (PlanEntryDraft) -> Void
-
-    @State private var mode: Mode = .create
-
-    // Start time (compact picker) — defaults to earliest available slot
-    @State private var start: Date
-
-    // Length (binds to minutes directly via reusable picker)
-    @State private var lengthMinutes: Int
-
-    // Create-new fields
-    @State private var title: String = ""
-    @State private var emoji: String = ""
-    @State private var description: String = ""
-
-    // Reuse-existing
-    @Query(sort: \Plan.title) private var allPlans: [Plan]
-    @State private var selectedPlanId: UUID?
-
-    init(
-        dayStart: Date, earliestStart: Date, remainingMinutes: Int,
-        onAdd: @escaping (PlanEntryDraft) -> Void
-    ) {
-        self.dayStart = dayStart
-        self.earliestStart = earliestStart
-        self.remainingMinutes = remainingMinutes
-        self.onAdd = onAdd
-
-        _start = State(initialValue: earliestStart)
-        _lengthMinutes = State(initialValue: max(5, min(30, remainingMinutes)))
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker("Mode", selection: $mode) {
-                        ForEach(Mode.allCases, id: \.self) {
-                            Text($0.rawValue).tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                if mode == .create {
-                    Section("Plan") {
-                        TextField("Title (e.g. Work, Gym, Lunch)", text: $title)
-                        TextField("Emoji (e.g. 💼, 🏋️, 🍔)", text: $emoji)
-                        TextField("Description (optional)", text: $description)
-                    }
-                } else {
-                    Section("Pick a reusable plan") {
-                        if allPlans.isEmpty {
-                            ContentUnavailableView(
-                                "No saved plans yet", systemImage: "shippingbox"
-                            )
-                        } else {
-                            Picker("Plan", selection: $selectedPlanId) {
-                                Text("Select…").tag(Optional<UUID>.none)
-                                ForEach(allPlans) { plan in
-                                    Text("\(plan.emoji) \(plan.title)").tag(
-                                        Optional(plan.id))
-                                }
-                            }
-                            .pickerStyle(.navigationLink)
-                        }
-                    }
-                }
-
-                Section("Schedule") {
-                    LabeledContent("Earliest available") {
-                        Text(
-                            earliestStart.formatted(
-                                date: .omitted, time: .shortened)
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("Remaining today") {
-                        Text(TimeUtil.formatMinutes(remainingMinutes))
-                            .foregroundStyle(
-                                remainingMinutes == 0 ? .red : .secondary)
-                    }
-
-                    // Start (compact) — clamp to earliest/dayStart
-                    DatePicker(
-                        "Start", selection: $start,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    .onChange(of: start) { newValue in
-                        let anchored = TimeUtil.anchoredTime(
-                            newValue, to: dayStart)
-                        let minAllowed = max(dayStart, earliestStart)
-                        if anchored < minAllowed { start = minAllowed }
-                    }
-
-                    // Length (compact-style minutes picker)
-                    LengthPicker(
-                        "Length", minutes: $lengthMinutes,
-                        initialMinutes: max(5, min(30, remainingMinutes))
-                    )
-                    .disabled(remainingMinutes <= 0)
-
-                    // Live preview
-                    let anchoredStart = TimeUtil.anchoredTime(
-                        start, to: dayStart)
-                    let end = anchoredStart.addingTimeInterval(
-                        TimeInterval(lengthMinutes * 60))
-                    LabeledContent("Will run") {
-                        Text(
-                            "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) (\(TimeUtil.formatMinutes(lengthMinutes)))"
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-
-                    if remainingMinutes <= 0 {
-                        Text(
-                            "No time left in today's 24-hour cycle from the schedule start."
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                    }
-                }
-            }
-            .navigationTitle("Add Plan")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        let draft = buildDraft()
-                        onAdd(draft)
-                        dismiss()
-                    }
-                    .disabled(!canAdd || remainingMinutes < 5)
-                }
+    private func deleteDrafts(at offsets: IndexSet) {
+        var arr = sortedDrafts()
+        for idx in offsets {
+            let draft = arr[idx]
+            if let realIdx = drafts.firstIndex(where: { $0.id == draft.id }) {
+                drafts.remove(at: realIdx)
             }
         }
     }
-
-    private var canAdd: Bool {
-        switch mode {
-        case .create:
-            return !title.trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty
-        case .reuse:
-            return selectedPlanId != nil
-        }
-    }
-
-    private func buildDraft() -> PlanEntryDraft {
-        // Clamp start against dayStart and earliestStart
-        let clampedStart = max(
-            TimeUtil.anchoredTime(start, to: dayStart),
-            max(dayStart, earliestStart)
-        )
-
-        // Clamp length within the 24h window from the chosen start
-        let clampedLen = DayScheduleEngine.clampDurationWithinDay(
-            start: clampedStart,
-            requestedMinutes: lengthMinutes,
-            day: DayWindow(start: dayStart)
-        )
-
-        switch mode {
-        case .create:
-            // Auto-save newly created plan for future reuse
-            let plan = Plan(
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                planDescription: description.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                ).isEmpty ? nil : description,
-                emoji: emoji.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty ? "🧩" : emoji
-            )
-            modelContext.insert(plan)
-            try? modelContext.save()
-
-            return PlanEntryDraft(
-                existingPlan: plan, start: clampedStart,
-                lengthMinutes: clampedLen)
-
-        case .reuse:
-            let plan = allPlans.first(where: { $0.id == selectedPlanId! })!
-            return PlanEntryDraft(
-                existingPlan: plan, start: clampedStart,
-                lengthMinutes: clampedLen)
-        }
-    }
 }
+
+// MARK: - Types
+
+private enum AddPlanMode { case new, reuse }

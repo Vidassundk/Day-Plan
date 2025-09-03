@@ -35,16 +35,21 @@ struct DayTemplateDetailView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 8) {
-                                    Text(sp.plan?.emoji ?? "🧩")
+                                    Text(sp.plan?.emoji ?? "🧩").foregroundColor(
+                                        .primary)
                                     Text(sp.plan?.title ?? "Untitled")
+                                        .foregroundColor(
+                                            .primary)
                                 }
                                 Text(rowSubtitle(for: sp))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .foregroundColor(
+                                        .primary)
                             }
                             .foregroundStyle(.primary)
                         }
-                        .buttonStyle(.plain)  // keep native label colors
+                        //                        .buttonStyle(.plain)  // Tis
 
                         .contextMenu {
                             Button(role: .destructive) {
@@ -92,6 +97,8 @@ struct DayTemplateDetailView: View {
                     startTime: anchored,
                     duration: TimeInterval(lengthMinutes * 60)
                 )
+                modelContext.insert(sp)  // ensure it's in the context
+                template.scheduledPlans.append(sp)  // mutate the parent array
                 sp.dayTemplate = template
                 try? modelContext.save()
             }
@@ -120,7 +127,7 @@ struct DayTemplateDetailView: View {
     }
 
     private var sortedPlans: [ScheduledPlan] {
-        (template.scheduledPlans ?? []).sorted { $0.startTime < $1.startTime }
+        template.scheduledPlans.sorted { $0.startTime < $1.startTime }
     }
 
     private func rowSubtitle(for sp: ScheduledPlan) -> String {
