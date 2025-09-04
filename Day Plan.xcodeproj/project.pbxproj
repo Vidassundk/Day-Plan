@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C1C92DAB2E685CE30078FE0D /* EmojiKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1C92DAA2E685CE30078FE0D /* EmojiKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C17F8C522E5C3B1E00F5BA15 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C1C92DAB2E685CE30078FE0D /* EmojiKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 				C17F8C412E5C3B1C00F5BA15 /* Day Plan */,
 				C17F8C542E5C3B1E00F5BA15 /* Day PlanTests */,
 				C17F8C5E2E5C3B1E00F5BA15 /* Day PlanUITests */,
+				C1C92DA92E685CE30078FE0D /* Frameworks */,
 				C17F8C402E5C3B1C00F5BA15 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +96,13 @@
 				C17F8C5B2E5C3B1E00F5BA15 /* Day PlanUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C1C92DA92E685CE30078FE0D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +125,7 @@
 			);
 			name = "Day Plan";
 			packageProductDependencies = (
+				C1C92DAA2E685CE30078FE0D /* EmojiKit */,
 			);
 			productName = "Day Plan";
 			productReference = C17F8C3F2E5C3B1C00F5BA15 /* Day Plan.app */;
@@ -195,6 +209,9 @@
 			);
 			mainGroup = C17F8C362E5C3B1C00F5BA15;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C1C92DA82E685B710078FE0D /* XCRemoteSwiftPackageReference "EmojiKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C17F8C402E5C3B1C00F5BA15 /* Products */;
 			projectDirPath = "";
@@ -396,6 +413,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Day Plan/Preview Content\"";
+				DEVELOPMENT_TEAM = LY7Z8UUKHR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -424,6 +442,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Day Plan/Preview Content\"";
+				DEVELOPMENT_TEAM = LY7Z8UUKHR;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -552,6 +571,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C1C92DA82E685B710078FE0D /* XCRemoteSwiftPackageReference "EmojiKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/danielsaidi/EmojiKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C1C92DAA2E685CE30078FE0D /* EmojiKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C1C92DA82E685B710078FE0D /* XCRemoteSwiftPackageReference "EmojiKit" */;
+			productName = EmojiKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C17F8C372E5C3B1C00F5BA15 /* Project object */;
 }

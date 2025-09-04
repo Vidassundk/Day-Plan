@@ -8,7 +8,9 @@
 import SwiftData
 import SwiftUI
 
-// AddOrReusePlanSheet.swift
+extension Color {
+    static var placeholderText: Color { Color(uiColor: .placeholderText) }
+}
 
 struct AddOrReusePlanSheet: View {
     enum Mode: String, CaseIterable {
@@ -22,6 +24,9 @@ struct AddOrReusePlanSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+
+    // 1) state to show a popover picker
+    @State private var showEmojiPicker = false
 
     @State private var mode: Mode = .create
     @State private var start: Date
@@ -59,9 +64,42 @@ struct AddOrReusePlanSheet: View {
                 if mode == .create {
                     Section("Plan") {
                         TextField("Title (e.g. Work, Gym, Lunch)", text: $title)
-                        TextField("Emoji (e.g. 💼, 🏋️, 🍔)", text: $emoji)
+
+                        Button {
+                            showEmojiPicker.toggle()
+                        } label: {
+                            let isPicked = emoji.isExactlyOneEmoji
+                            HStack {
+                                Text(isPicked ? emoji : "Pick an Emoji")
+                                    .font(.body)
+                                    // Use Color on BOTH sides so the types match
+                                    .foregroundStyle(
+                                        isPicked
+                                            ? Color.primary
+                                            : Color(uiColor: .placeholderText)
+                                    )
+                                // (optional) make the picked emoji a bit larger:
+                                //.font(isPicked ? .title3 : .body)
+
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 2)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(
+                            isPresented: $showEmojiPicker,
+                            attachmentAnchor: .rect(.bounds),
+                            arrowEdge: .trailing
+                        ) {
+                            EmojiKitPickerView(selection: $emoji)
+                                .presentationCompactAdaptation(.sheet)
+                        }
+
                         TextField("Description (optional)", text: $description)
                     }
+
                 } else {
                     Section("Pick a reusable plan") {
                         if allPlans.isEmpty {
@@ -128,9 +166,7 @@ struct AddOrReusePlanSheet: View {
                                 planDescription: description.trimmingCharacters(
                                     in: .whitespacesAndNewlines
                                 ).isEmpty ? nil : description,
-                                emoji: emoji.trimmingCharacters(
-                                    in: .whitespacesAndNewlines
-                                ).isEmpty ? "🧩" : emoji
+                                emoji: emoji  // guaranteed one emoji now
                             )
                             modelContext.insert(p)
                             try? modelContext.save()  // persist for reuse
@@ -151,9 +187,13 @@ struct AddOrReusePlanSheet: View {
     private var canAdd: Bool {
         switch mode {
         case .create:
-            return !title.trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty
-        case .reuse: return selectedPlanId != nil
+            let hasTitle = !title.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty
+            return hasTitle && emoji.isExactlyOneEmoji
+        case .reuse:
+            return selectedPlanId != nil
         }
     }
+
 }
