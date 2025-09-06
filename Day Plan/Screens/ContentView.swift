@@ -18,7 +18,7 @@ struct ContentView: View {
                 // MARK: Today
                 Section {
                     if let template = todaysTemplate {
-                        TodayTimelineView(template: template)
+                        TodayTimelineView(templateID: template.id)
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets())
                     } else {

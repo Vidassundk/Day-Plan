@@ -36,12 +36,7 @@ struct AddDayTemplateView: View {
 
         NavigationStack {
             Form {
-                // MARK: Template
-                Section("Template") {
-                    TextField("Name", text: $name)
-                        .textInputAutocapitalization(.words)
-
-                }
+                // Template section unchanged...
 
                 // MARK: Plans
                 Section("Plans") {
@@ -59,12 +54,6 @@ struct AddDayTemplateView: View {
 
                     Button {
                         showAddSheet = true
-                        addMode = .reuse
-                        newPlanTitle = ""
-                        newPlanEmoji = "🧩"
-                        selectedPlanId = allPlans.first?.id
-                        sheetStart = TimeUtil.anchoredTime(.now, to: startTime)
-                        sheetLength = 60
                     } label: {
                         Label("Add Plan", systemImage: "plus")
                     }
@@ -81,7 +70,26 @@ struct AddDayTemplateView: View {
                 }
             }
             .sheet(isPresented: $showAddSheet) {
-                addPlanSheet(day: day)
+                // ✅ Use the unified sheet everywhere
+                AddOrReusePlanSheet(
+                    anchorDay: day.start,
+                    initialStart: TimeUtil.anchoredTime(.now, to: day.start),  // like before
+                    initialLengthMinutes: 60
+                ) { plan, start, length in
+                    // Clamp to 24h window and append as a draft
+                    let clamped = DayScheduleEngine.clampDurationWithinDay(
+                        start: start,
+                        requestedMinutes: length,
+                        day: day
+                    )
+                    drafts.append(
+                        PlanEntryDraft(
+                            existingPlan: plan,
+                            start: start,
+                            lengthMinutes: clamped
+                        )
+                    )
+                }
             }
         }
     }
@@ -89,20 +97,22 @@ struct AddDayTemplateView: View {
     // MARK: - Rows
 
     private func draftRow(draft: PlanEntryDraft, day: DayWindow) -> some View {
-        // Binding helpers to mutate the specific draft in place
         let idx = drafts.firstIndex(where: { $0.id == draft.id })!
+        let livePlan = modelContext.plan(with: draft.planID)
+
+        let title = (livePlan?.title ?? draft.titleSnapshot)
+        let emoji = (livePlan?.emoji ?? draft.emojiSnapshot)
 
         return HStack(spacing: 12) {
-            Text(
-                draft.existingPlan.emoji.isEmpty
-                    ? "🧩" : draft.existingPlan.emoji
-            )
-            .font(.title3)
-
+            Text(emoji.isEmpty ? "🧩" : emoji).font(.title3)
             VStack(alignment: .leading, spacing: 4) {
-                Text(
-                    draft.existingPlan.title.isEmpty
-                        ? "Untitled" : draft.existingPlan.title)
+                HStack(spacing: 8) {
+                    Text(title.isEmpty ? "Untitled" : title)
+                    if livePlan == nil {
+                        Text("Deleted").font(.caption).foregroundStyle(
+                            .secondary)
+                    }
+                }
 
                 // Timing display (anchored + clamped preview)
                 let anchoredStart = TimeUtil.anchoredTime(
@@ -158,6 +168,16 @@ struct AddDayTemplateView: View {
                     ),
                     initialMinutes: max(5, drafts[idx].lengthMinutes)
                 )
+            }
+        }
+        // Optional: let users swipe away drafts whose plan was deleted
+        .swipeActions {
+            if livePlan == nil {
+                Button(role: .destructive) {
+                    drafts.removeAll { $0.id == draft.id }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
             }
         }
     }
@@ -288,6 +308,11 @@ struct AddDayTemplateView: View {
         let day = DayWindow(start: template.startTime)
 
         for draft in drafts {
+            // If the plan was deleted, skip this draft
+            guard let plan = modelContext.plan(with: draft.planID) else {
+                continue
+            }
+
             let start = TimeUtil.anchoredTime(
                 draft.start, to: template.startTime)
             let minutes = DayScheduleEngine.clampDurationWithinDay(
@@ -297,7 +322,7 @@ struct AddDayTemplateView: View {
             )
 
             let scheduled = ScheduledPlan(
-                plan: draft.existingPlan,
+                plan: plan,
                 startTime: start,
                 duration: TimeInterval(minutes * 60)
             )

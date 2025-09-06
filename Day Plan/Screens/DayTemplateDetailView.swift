@@ -1,11 +1,24 @@
 import SwiftData
 import SwiftUI
 
+extension ModelContext {
+    func scheduledPlan(with id: UUID) -> ScheduledPlan? {
+        let fd = FetchDescriptor<ScheduledPlan>(
+            predicate: #Predicate { $0.id == id })
+        return try? fetch(fd).first
+    }
+}
+
+extension UUID: Identifiable {
+    public var id: UUID { self }
+}
+
 struct DayTemplateDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var template: DayTemplate
     @State private var showingAdd = false
     @State private var editing: ScheduledPlan?
+    @State private var editingID: UUID?
 
     private func delete(at offsets: IndexSet) {
         let items = sortedPlans
@@ -20,53 +33,54 @@ struct DayTemplateDetailView: View {
                 TextField("Name", text: $template.name)
             }
 
-            // 🔹 Plans section with title
             Section("Plans") {
-                if sortedPlans.isEmpty {
-                    ContentUnavailableView(
-                        "No plans yet",
-                        systemImage: "list.bullet.rectangle"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .center)
-                } else {
-                    ForEach(sortedPlans) { sp in
+                let ids = sortedPlans.map(\.id)
+                ForEach(ids, id: \.self) { spID in
+                    if let sp = modelContext.scheduledPlan(with: spID) {
                         Button {
-                            editing = sp
+                            editingID = spID
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 8) {
-                                    Text(sp.plan?.emoji ?? "🧩").foregroundColor(
-                                        .primary)
+                                    Text(sp.plan?.emoji ?? "🧩")
                                     Text(sp.plan?.title ?? "Untitled")
-                                        .foregroundColor(
-                                            .primary)
                                 }
                                 Text(rowSubtitle(for: sp))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    .foregroundColor(
-                                        .primary)
-                            }
-                            .foregroundStyle(.primary)
-                        }
-                        //                        .buttonStyle(.plain)  // Tis
-
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                delete(sp)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
                             }
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        .swipeActions {
                             Button(role: .destructive) {
-                                delete(sp)
+                                modelContext.delete(sp)
+                                try? modelContext.save()
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
                     }
-                    .onDelete(perform: delete)
+                }
+                .onDelete { offsets in
+                    let toDelete = offsets.map { ids[$0] }
+                    toDelete.compactMap { modelContext.scheduledPlan(with: $0) }
+                        .forEach { modelContext.delete($0) }
+                    try? modelContext.save()
+                }
+            }
+            .sheet(item: $editingID) { spID in
+                if let sp = modelContext.scheduledPlan(with: spID) {
+                    EditScheduledPlanSheet(
+                        template: template,
+                        planToEdit: sp,
+                        onSaved: { try? modelContext.save() },
+                        onDelete: {
+                            modelContext.delete(sp)
+                            try? modelContext.save()
+                        }
+                    )
+                } else {
+                    // Deleted meanwhile – nothing to edit
+                    EmptyView()
                 }
             }
 

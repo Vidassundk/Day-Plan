@@ -25,6 +25,14 @@ struct AddOrReusePlanSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @State private var planPendingDeletion: Plan?
+    private var isShowingDeleteConfirm: Binding<Bool> {
+        Binding(
+            get: { planPendingDeletion != nil },
+            set: { if !$0 { planPendingDeletion = nil } }
+        )
+    }
+
     // 1) state to show a popover picker
     @State private var showEmojiPicker = false
 
@@ -43,147 +51,212 @@ struct AddOrReusePlanSheet: View {
 
     init(
         anchorDay: Date,
+        initialStart: Date? = nil,
+        initialLengthMinutes: Int = 30,
         onAdd: @escaping (_ plan: Plan, _ start: Date, _ lengthMinutes: Int) ->
             Void
     ) {
         self.anchorDay = anchorDay
         self.onAdd = onAdd
-        _start = State(initialValue: anchorDay)  // HH:mm editor needs a stable date
-        _lengthMinutes = State(initialValue: 30)  // default; still min 5 via LengthPicker
+        _start = State(initialValue: initialStart ?? anchorDay)
+        _lengthMinutes = State(initialValue: max(5, initialLengthMinutes))
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Picker("Mode", selection: $mode) {
-                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
-                    }.pickerStyle(.segmented)
-                }
-
-                if mode == .create {
-                    Section("Plan") {
-                        TextField("Title (e.g. Work, Gym, Lunch)", text: $title)
-
-                        Button {
-                            showEmojiPicker.toggle()
-                        } label: {
-                            let isPicked = emoji.isExactlyOneEmoji
-                            HStack {
-                                Text(isPicked ? emoji : "Pick an Emoji")
-                                    .font(.body)
-                                    // Use Color on BOTH sides so the types match
-                                    .foregroundStyle(
-                                        isPicked
-                                            ? Color.primary
-                                            : Color(uiColor: .placeholderText)
-                                    )
-                                // (optional) make the picked emoji a bit larger:
-                                //.font(isPicked ? .title3 : .body)
-
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .padding(.vertical, 2)
-                        }
-                        .buttonStyle(.plain)
-                        .popover(
-                            isPresented: $showEmojiPicker,
-                            attachmentAnchor: .rect(.bounds),
-                            arrowEdge: .trailing
-                        ) {
-                            EmojiKitPickerView(selection: $emoji)
-                                .presentationCompactAdaptation(.sheet)
-                        }
-
-                        TextField("Description (optional)", text: $description)
-                    }
-
-                } else {
-                    Section("Pick a reusable plan") {
-                        if allPlans.isEmpty {
-                            ContentUnavailableView(
-                                "No saved plans yet", systemImage: "shippingbox"
-                            )
-                        } else {
-                            Picker("Plan", selection: $selectedPlanId) {
-                                Text("Select…").tag(Optional<UUID>.none)
-                                ForEach(allPlans) { p in
-                                    Text("\(p.emoji) \(p.title)").tag(
-                                        Optional(p.id))
-                                }
-                            }
-                            .pickerStyle(.navigationLink)
-                        }
-                    }
-                }
-
-                Section("Schedule") {
-                    // ⛔️ REMOVE the “Earliest available” & “Remaining today” rows.
-                    // (These implied blocking logic.)
-
-                    DatePicker(
-                        "Start", selection: $start,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    // ⛔️ REMOVE clamping in onChange — overlaps and out-of-order are allowed now.
-
-                    LengthPicker(
-                        "Length", minutes: $lengthMinutes, initialMinutes: 30)
-                    // ⛔️ No disabling based on remaining time.
-
-                    let anchoredStart = TimeUtil.anchoredTime(
-                        start, to: anchorDay)
-                    let end = anchoredStart.addingTimeInterval(
-                        TimeInterval(lengthMinutes * 60))
-                    LabeledContent("Will run") {
-                        Text(
-                            "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) (\(TimeUtil.formatMinutes(lengthMinutes)))"
-                        )
-                        .foregroundStyle(.secondary)
-                    }
-                }
+                modePickerSection
+                planSection
+                scheduleSection
             }
             .navigationTitle("Add Plan")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+            .toolbar { toolbarContent }
+            .confirmationDialog(
+                "Delete this plan?",
+                isPresented: isShowingDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { performDelete() }
+                Button("Cancel", role: .cancel) { planPendingDeletion = nil }
+            } message: {
+                Text(
+                    "This removes the plan from your reusable list. Existing schedules keep their time slots (the plan reference becomes empty)."
+                )
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var modePickerSection: some View {
+        Section {
+            Picker("Mode", selection: $mode) {
+                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var planSection: some View {
+        switch mode {
+        case .create: createPlanSection
+        case .reuse: reusePlanSection
+        }
+    }
+
+    @ViewBuilder
+    private var createPlanSection: some View {
+        Section("Plan") {
+            TextField("Title (e.g. Work, Gym, Lunch)", text: $title)
+
+            Button {
+                showEmojiPicker.toggle()
+            } label: {
+                let isPicked = emoji.isExactlyOneEmoji
+                HStack {
+                    Text(isPicked ? emoji : "Pick an Emoji")
+                        .font(.body)
+                        .foregroundStyle(
+                            isPicked
+                                ? Color.primary
+                                : Color(uiColor: .placeholderText))
+                    Spacer()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        // ✅ No length/start clamps. Just anchor HH:mm to a stable date for storage.
-                        let anchoredStart = TimeUtil.anchoredTime(
-                            start, to: anchorDay)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(.vertical, 2)
+            }
+            .buttonStyle(.plain)
+            .popover(
+                isPresented: $showEmojiPicker,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .trailing
+            ) {
+                EmojiKitPickerView(selection: $emoji)
+                    .presentationCompactAdaptation(.sheet)
+            }
 
-                        let plan: Plan
-                        switch mode {
-                        case .create:
-                            let p = Plan(
-                                title: title.trimmingCharacters(
-                                    in: .whitespacesAndNewlines),
-                                planDescription: description.trimmingCharacters(
-                                    in: .whitespacesAndNewlines
-                                ).isEmpty ? nil : description,
-                                emoji: emoji  // guaranteed one emoji now
-                            )
-                            modelContext.insert(p)
-                            try? modelContext.save()  // persist for reuse
-                            plan = p
-                        case .reuse:
-                            plan = allPlans.first { $0.id == selectedPlanId! }!
+            TextField("Description (optional)", text: $description)
+        }
+    }
+
+    @ViewBuilder
+    private var reusePlanSection: some View {
+        Section("Pick a reusable plan") {
+            if allPlans.isEmpty {
+                ContentUnavailableView(
+                    "No saved plans yet", systemImage: "shippingbox")
+            } else {
+                ForEach(allPlans) { p in
+                    Button {
+                        selectedPlanId = p.id
+                    } label: {
+                        HStack {
+                            Text("\(p.emoji) \(p.title)")
+                            Spacer()
+                            if selectedPlanId == p.id {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                            }
                         }
-
-                        onAdd(plan, anchoredStart, lengthMinutes)
-                        dismiss()
                     }
-                    .disabled(!canAdd)  // only gate on having a plan/title selected
+                    .buttonStyle(.plain)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            planPendingDeletion = p
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private var scheduleSection: some View {
+        Section("Schedule") {
+            DatePicker(
+                "Start", selection: $start, displayedComponents: .hourAndMinute
+            )
+            .datePickerStyle(.compact)
+
+            // Use the current state's length to seed the control nicely
+            LengthPicker(
+                "Length", minutes: $lengthMinutes,
+                initialMinutes: max(5, lengthMinutes))
+
+            LabeledContent("Will run") {
+                Text(willRunText)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Toolbar & Actions
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Add") { performAdd() }
+                .disabled(!canAdd)
+        }
+    }
+
+    private func performAdd() {
+        let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
+
+        let plan: Plan
+        switch mode {
+        case .create:
+            let p = Plan(
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                planDescription: {
+                    let trimmed = description.trimmingCharacters(
+                        in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }(),
+                emoji: emoji
+            )
+            modelContext.insert(p)
+            try? modelContext.save()
+            plan = p
+
+        case .reuse:
+            guard let id = selectedPlanId,
+                let found = allPlans.first(where: { $0.id == id })
+            else { return }
+            plan = found
+        }
+
+        onAdd(plan, anchoredStart, lengthMinutes)
+        dismiss()
+    }
+
+    private func performDelete() {
+        guard let doomed = planPendingDeletion else { return }
+        if selectedPlanId == doomed.id { selectedPlanId = nil }
+        modelContext.delete(doomed)
+        try? modelContext.save()
+        planPendingDeletion = nil
+    }
+
+    // MARK: - Derived
+
+    private var willRunText: String {
+        let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
+        let end = anchoredStart.addingTimeInterval(
+            TimeInterval(lengthMinutes * 60))
+        let startStr = anchoredStart.formatted(date: .omitted, time: .shortened)
+        let endStr = end.formatted(date: .omitted, time: .shortened)
+        return
+            "\(startStr) – \(endStr) (\(TimeUtil.formatMinutes(lengthMinutes)))"
+    }
     private var canAdd: Bool {
         switch mode {
         case .create:

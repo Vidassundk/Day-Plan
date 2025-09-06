@@ -1,69 +1,76 @@
-// PATCH 1/2 — TodayTimelineView.swift
-// Choose ONE primary current item among overlapping "current" plans.
-// The *last* active plan (by start time) is considered primary.
-
+// TodayTimelineView.swift
 import SwiftData
 import SwiftUI
 
 struct TodayTimelineView: View {
-    let template: DayTemplate
+    @Environment(\.modelContext) private var modelContext
+    let templateID: UUID
 
     @State private var gutterMode: GutterMode = .auto
-    private enum GutterMode: String, CaseIterable, Hashable {
-        case auto, show, hide
-    }
-
-    private var plans: [ScheduledPlan] {
-        (template.scheduledPlans ?? []).sorted { $0.startTime < $1.startTime }
-    }
-
-    private var dayStart: Date { template.startTime }
-    private var dayEnd: Date { dayStart.addingTimeInterval(24 * 60 * 60) }
+    private enum GutterMode: String, CaseIterable { case auto, show, hide }
     private let tick: TimeInterval = 1
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            //            controlRow
-
-            TimelineView(.periodic(from: .now, by: tick)) { context in
-                let anchoredNow = TimeUtil.anchoredTime(
-                    context.date, to: dayStart)
-                let now = min(max(anchoredNow, dayStart), dayEnd)
-
-                // Day completion and gutter visibility
-                let lastEnd =
-                    plans.last.map {
-                        $0.startTime.addingTimeInterval($0.duration)
-                    } ?? dayStart
-                let dayComplete = now >= lastEnd
-                let showSpine: Bool = {
-                    switch gutterMode {
-                    case .show: return true
-                    case .hide: return false
-                    case .auto: return !dayComplete
-                    }
-                }()
-
-                // Primary current index among overlaps (last-starting wins)
-                let activeIndices = plans.indices.filter { i in
-                    let sp = plans[i]
-                    let end = sp.startTime.addingTimeInterval(sp.duration)
-                    return now >= sp.startTime && now < end
-                }
-                let primaryActiveIndex = activeIndices.last
-
-                TimelineList(
-                    plans: plans,
-                    dayStart: dayStart,
-                    now: now,
-                    showSpine: showSpine,
-                    primaryActiveIndex: primaryActiveIndex
-                )
-            }
-        }
+    private func fetchTemplate() -> DayTemplate? {
+        let fd = FetchDescriptor<DayTemplate>(
+            predicate: #Predicate { $0.id == templateID })
+        return try? modelContext.fetch(fd).first
     }
 
-    // MARK: - Pieces
+    private func fetchPlans() -> [ScheduledPlan] {
+        let fd = FetchDescriptor<ScheduledPlan>(
+            predicate: #Predicate { $0.dayTemplate?.id == templateID }
+        )
+        return
+            (try? modelContext.fetch(fd).sorted { $0.startTime < $1.startTime })
+            ?? []
+    }
+
+    var body: some View {
+        Group {
+            if let template = fetchTemplate() {
+                let dayStart = template.startTime
+                let dayEnd = dayStart.addingTimeInterval(24 * 60 * 60)
+
+                TimelineView(.periodic(from: .now, by: tick)) { ctx in
+                    let plans = fetchPlans()  // fresh each tick; small dataset is fine
+                    let anchoredNow = TimeUtil.anchoredTime(
+                        ctx.date, to: dayStart)
+                    let now = min(max(anchoredNow, dayStart), dayEnd)
+
+                    let lastEnd =
+                        plans.last.map {
+                            $0.startTime.addingTimeInterval($0.duration)
+                        } ?? dayStart
+                    let dayComplete = now >= lastEnd
+                    let showSpine: Bool =
+                        (gutterMode == .show)
+                        || (gutterMode == .auto && !dayComplete)
+
+                    let active = plans.indices.filter { i in
+                        let sp = plans[i]
+                        let end = sp.startTime.addingTimeInterval(sp.duration)
+                        return now >= sp.startTime && now < end
+                    }
+                    let primaryActiveIndex = active.last
+
+                    TimelineList(
+                        plans: plans,
+                        dayStart: dayStart,
+                        now: now,
+                        showSpine: showSpine,
+                        primaryActiveIndex: primaryActiveIndex
+                    )
+                }
+            } else {
+                ContentUnavailableView(
+                    "Template deleted",
+                    systemImage: "calendar.badge.exclamationmark")
+            }
+        }
+        .id(templateID)
+    }
+
+    // MARK: - Optional controls
 
     private var controlRow: some View {
         HStack(spacing: 12) {
@@ -82,6 +89,8 @@ struct TodayTimelineView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - Inner list
+
     private struct TimelineList: View {
         let plans: [ScheduledPlan]
         let dayStart: Date
@@ -95,7 +104,7 @@ struct TodayTimelineView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        // NEW: pre-first gap row
+                        // Before-first gap
                         if let first = plans.first, now < first.startTime {
                             let minsLeft = max(
                                 0,
@@ -120,7 +129,7 @@ struct TodayTimelineView: View {
                                 isPrimaryCurrent: (i == primaryActiveIndex)
                             )
 
-                            // Insert an in-between row when NOW is between this plan's end and the next plan's start.
+                            // Between-plan gap if now lies between this plan's end and next plan's start
                             if i < plans.count - 1 {
                                 let next = plans[i + 1]
                                 let end = sp.startTime.addingTimeInterval(
@@ -162,52 +171,53 @@ struct TodayTimelineView: View {
 }
 
 #if DEBUG
+    import SwiftData
     import SwiftUI
 
     struct TodayTimelineView_Previews: PreviewProvider {
         static var previews: some View {
+            // In-memory container with a seeded template and a couple of plans
+            let schema = Schema([
+                DayTemplate.self, ScheduledPlan.self, Plan.self,
+                WeekdayAssignment.self,
+            ])
+            let container = try! ModelContainer(
+                for: schema,
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+            let ctx = container.mainContext
             let cal = Calendar.current
             let startOfDay = cal.startOfDay(for: .now)
 
-            // Sample Plans (kept minimal here; your real preview seeds much more)
             let a = Plan(
                 title: "Standup", planDescription: "Sprint 42", emoji: "👥")
             let b = Plan(
-                title: "Design Sync", planDescription: "Typography", emoji: "🎨")
-            let c = Plan(
                 title: "Lunch", planDescription: "Chicken salad", emoji: "🥗")
-            let d = Plan(
-                title: "Workout", planDescription: "Push day", emoji: "💪")
 
-            let plans: [ScheduledPlan] = [
-                .init(
-                    plan: a,
-                    startTime: cal.date(
-                        byAdding: .hour, value: 8, to: startOfDay)!,
-                    duration: 45 * 60),
-                .init(
-                    plan: b,
-                    startTime: cal.date(
-                        byAdding: .hour, value: 10, to: startOfDay)!,
-                    duration: 75 * 60),
-                .init(
-                    plan: c,
-                    startTime: cal.date(
-                        byAdding: .hour, value: 13, to: startOfDay)!,
-                    duration: 60 * 60),
-                .init(
-                    plan: d,
-                    startTime: cal.date(
-                        byAdding: .hour, value: 16, to: startOfDay)!,
-                    duration: 30 * 60),
-            ]
+            let sp1 = ScheduledPlan(
+                plan: a,
+                startTime: cal.date(byAdding: .hour, value: 9, to: startOfDay)!,
+                duration: 45 * 60)
+            let sp2 = ScheduledPlan(
+                plan: b,
+                startTime: cal.date(
+                    byAdding: .hour, value: 12, to: startOfDay)!,
+                duration: 60 * 60)
 
-            let template = DayTemplate(
-                name: "Sample Day", startTime: startOfDay)
-            template.scheduledPlans = plans
+            let tpl = DayTemplate(name: "Sample Day", startTime: startOfDay)
+            tpl.scheduledPlans = [sp1, sp2]
+            sp1.dayTemplate = tpl
+            sp2.dayTemplate = tpl
 
-            return TodayTimelineView(template: template)
-                .previewDisplayName("TodayTimelineView — Primary current spine")
+            ctx.insert(a)
+            ctx.insert(b)
+            ctx.insert(sp1)
+            ctx.insert(sp2)
+            ctx.insert(tpl)
+            try? ctx.save()
+
+            return TodayTimelineView(templateID: tpl.id)
+                .modelContainer(container)
+                .previewDisplayName("TodayTimelineView — by ID")
         }
     }
 #endif
