@@ -45,6 +45,10 @@ struct AddOrReusePlanSheet: View {
     @State private var emoji = ""
     @State private var description = ""
 
+    // NEW: color picking state
+    @State private var useCustomColor = false
+    @State private var chosenColor: Color = .accentColor
+
     // Reuse-existing
     @Query(sort: \Plan.title) private var allPlans: [Plan]
     @State private var selectedPlanId: UUID?
@@ -119,9 +123,7 @@ struct AddOrReusePlanSheet: View {
                     Text(isPicked ? emoji : "Pick an Emoji")
                         .font(.body)
                         .foregroundStyle(
-                            isPicked
-                                ? Color.primary
-                                : Color(uiColor: .placeholderText))
+                            isPicked ? Color.primary : .placeholderText)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,8 +132,7 @@ struct AddOrReusePlanSheet: View {
             }
             .buttonStyle(.plain)
             .popover(
-                isPresented: $showEmojiPicker,
-                attachmentAnchor: .rect(.bounds),
+                isPresented: $showEmojiPicker, attachmentAnchor: .rect(.bounds),
                 arrowEdge: .trailing
             ) {
                 EmojiKitPickerView(selection: $emoji)
@@ -139,6 +140,10 @@ struct AddOrReusePlanSheet: View {
             }
 
             TextField("Description (optional)", text: $description)
+
+            // NEW: always show — no opacity control
+            ColorPicker(
+                "Color", selection: $chosenColor, supportsOpacity: false)
         }
     }
 
@@ -153,12 +158,15 @@ struct AddOrReusePlanSheet: View {
                     Button {
                         selectedPlanId = p.id
                     } label: {
-                        HStack {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(p.tintColor)  // uses the helper from Plan.swift
+                                .frame(width: 10, height: 10)
                             Text("\(p.emoji) \(p.title)")
                             Spacer()
                             if selectedPlanId == p.id {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(Color.accentColor)
+                                Image(systemName: "checkmark").foregroundStyle(
+                                    Color.accentColor)
                             }
                         }
                     }
@@ -211,6 +219,15 @@ struct AddOrReusePlanSheet: View {
     private func performAdd() {
         let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
 
+        // Helper: treat accent as “no custom color” -> store empty string
+        func storedHex(for color: Color) -> String {
+            let picked = color.toHexRGB()?.uppercased()
+            let accent = Color.accentColor.toHexRGB()?.uppercased()
+            // If we can compare and they match, return "", else the picked hex (or "")
+            if let p = picked, let a = accent, p == a { return "" }
+            return picked ?? ""
+        }
+
         let plan: Plan
         switch mode {
         case .create:
@@ -221,7 +238,8 @@ struct AddOrReusePlanSheet: View {
                         in: .whitespacesAndNewlines)
                     return trimmed.isEmpty ? nil : trimmed
                 }(),
-                emoji: emoji
+                emoji: emoji,
+                colorHex: storedHex(for: chosenColor)  // ⬅️ key line
             )
             modelContext.insert(p)
             try? modelContext.save()

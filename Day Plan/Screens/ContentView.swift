@@ -75,38 +75,64 @@ struct ContentView: View {
         assignments.first(where: { $0.weekdayRaw == today.rawValue })?.template
     }
 }
-
 #if DEBUG
     import SwiftUI
     import SwiftData
 
-    struct ContentView_FullDemo_Previews: PreviewProvider {
+    private enum PreviewPalette {
+        // small, high-contrast set; reuse via modulo
+        static let base8: [String] = [
+            "#1E88E5", "#8E24AA", "#43A047", "#FB8C00",
+            "#F4511E", "#3949AB", "#26A69A", "#AB47BC",
+        ]
+    }
+
+    // MARK: - Helpers shared by previews
+    @MainActor
+    private func makeInMemoryContainer() -> ModelContainer {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try! ModelContainer(
+            for: DayTemplate.self,
+            ScheduledPlan.self,
+            Plan.self,
+            WeekdayAssignment.self,
+            configurations: config
+        )
+    }
+
+    private func assignToday(_ tpl: DayTemplate, using cal: Calendar = .current)
+        -> WeekdayAssignment
+    {
+        // Map Apple weekday (1=Sun...7=Sat) -> your enum (likely Monday-based)
+        let today = Date()
+        let wdApple = cal.component(.weekday, from: today)  // 1...7
+        let mondayBased = ((wdApple + 5) % 7) + 1  // 1...7 starting Monday
+        let weekday = Weekday(rawValue: mondayBased) ?? .monday
+        return WeekdayAssignment(weekday: weekday, template: tpl)
+    }
+
+    // MARK: - Preview A — Small, no overlap
+    struct ContentView_NoOverlap_Previews: PreviewProvider {
+        static let container: ModelContainer = {
+            let c = makeInMemoryContainer()
+            seed_NoOverlap(into: c)
+            return c
+        }()
+
         static var previews: some View {
-            let schema = Schema([
-                DayTemplate.self,
-                ScheduledPlan.self,
-                Plan.self,
-                WeekdayAssignment.self,
-            ])
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            let container = try! ModelContainer(
-                for: schema, configurations: config)
-
-            seedDemoData_NoOverlap(into: container)
-
-            return ContentView()
+            ContentView()
                 .modelContainer(container)
-                .previewDisplayName("ContentView — No Overlap (baseline)")
+                .previewDisplayName(
+                    "ContentView — No Overlap (3 plans, colored)")
         }
 
-        private static func seedDemoData_NoOverlap(
-            into container: ModelContainer
-        ) {
+        @MainActor
+        private static func seed_NoOverlap(into container: ModelContainer) {
             let ctx = container.mainContext
             let cal = Calendar.current
-            let now = Date()
-            let startOfDay = cal.startOfDay(for: now)
+            let startOfDay = cal.startOfDay(for: Date())
 
+            // Plans
             let a = Plan(
                 title: "Standup", planDescription: "Sprint 42", emoji: "👥")
             let b = Plan(
@@ -116,21 +142,26 @@ struct ContentView: View {
                 title: "Deep Work", planDescription: "Feature branch",
                 emoji: "💻")
 
-            let s0 = cal.date(byAdding: .hour, value: 9, to: startOfDay)!
+            // Hard-coded colors
+            a.colorHex = "#1E88E5"  // blue
+            b.colorHex = "#43A047"  // green
+            c.colorHex = "#FB8C00"  // orange
+
+            // Times
+            let s0 = cal.date(
+                bySettingHour: 9, minute: 0, second: 0, of: startOfDay)!
             let s1 = cal.date(byAdding: .minute, value: 60, to: s0)!
             let s2 = cal.date(byAdding: .minute, value: 60, to: s1)!
 
+            // Blocks
             let sp0 = ScheduledPlan(plan: a, startTime: s0, duration: 55 * 60)
             let sp1 = ScheduledPlan(plan: b, startTime: s1, duration: 45 * 60)
             let sp2 = ScheduledPlan(plan: c, startTime: s2, duration: 60 * 60)
 
+            // Template + assignment
             let tpl = DayTemplate(name: "Workday", startTime: startOfDay)
             tpl.scheduledPlans = [sp0, sp1, sp2]
-
-            let wdApple = cal.component(.weekday, from: now)
-            let mondayBased = ((wdApple + 5) % 7) + 1
-            let weekday = Weekday(rawValue: mondayBased) ?? .monday
-            let assignment = WeekdayAssignment(weekday: weekday, template: tpl)
+            let assignment = assignToday(tpl)
 
             [a, b, c].forEach { ctx.insert($0) }
             [sp0, sp1, sp2].forEach { ctx.insert($0) }
@@ -140,223 +171,121 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Preview B — Light overlaps, concise palette
     struct ContentView_Overlap_Previews: PreviewProvider {
+        static let container: ModelContainer = {
+            let c = makeInMemoryContainer()
+            seed_Overlap(into: c)
+            return c
+        }()
+
         static var previews: some View {
-            let schema = Schema([
-                DayTemplate.self,
-                ScheduledPlan.self,
-                Plan.self,
-                WeekdayAssignment.self,
-            ])
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            let container = try! ModelContainer(
-                for: schema, configurations: config)
-
-            seedDemoData_WithOverlaps(into: container)
-
-            return ContentView()
+            ContentView()
                 .modelContainer(container)
-                .previewDisplayName(
-                    "ContentView — Overlapping Times (Full Day)")
+                .previewDisplayName("ContentView — Overlaps (8 plans, colored)")
         }
 
-        /// Seeds a **full day** with intentional overlaps to exercise timeline rendering thoroughly.
-        private static func seedDemoData_WithOverlaps(
-            into container: ModelContainer
-        ) {
+        @MainActor
+        private static func seed_Overlap(into container: ModelContainer) {
             let ctx = container.mainContext
             let cal = Calendar.current
-            let now = Date()
-            let startOfDay = cal.startOfDay(for: now)
+            let startOfDay = cal.startOfDay(for: Date())
 
-            // Helper for clock times & durations
             func at(_ h: Int, _ m: Int = 0) -> Date {
                 cal.date(
                     bySettingHour: h, minute: m, second: 0, of: startOfDay)!
             }
             func mins(_ m: Int) -> TimeInterval { TimeInterval(m * 60) }
 
-            // Plans
-            let morning = Plan(
-                title: "Morning Routine", planDescription: "Wash up, stretch",
+            // 16 plans (compact labels, good variety)
+            let wake = Plan(
+                title: "Wake & Stretch", planDescription: "Light mobility",
                 emoji: "🌅")
-            let breakfast = Plan(
-                title: "Breakfast", planDescription: "Oats & coffee", emoji: "🍳"
-            )
-            let podcast = Plan(
-                title: "Podcast", planDescription: "Tech news", emoji: "🎧")
-            let commute = Plan(
-                title: "Commute", planDescription: "Bus + walk", emoji: "🚌")
+            let coffee = Plan(
+                title: "Coffee", planDescription: "Dial in grind", emoji: "☕️")
             let emails = Plan(
-                title: "Inbox Sweep", planDescription: "Zero-ish", emoji: "📨")
+                title: "Emails", planDescription: "Triage inbox", emoji: "📨")
             let standup = Plan(
-                title: "Standup", planDescription: "Sprint sync", emoji: "👥")
-            let oneOnOne = Plan(
-                title: "1:1", planDescription: "Mentoring", emoji: "🧭")
-            let deep = Plan(
-                title: "Deep Work", planDescription: "Feature X", emoji: "💻")
-            let prReview = Plan(
-                title: "PR Review", planDescription: "Queue", emoji: "🔍")
-            let designRev = Plan(
+                title: "Standup", planDescription: "Daily sync", emoji: "👥")
+            let planning = Plan(
+                title: "Planning", planDescription: "Today’s tasks", emoji: "🗂️")
+            let deepAM = Plan(
+                title: "Deep Work A", planDescription: "Feature X", emoji: "💻")
+            let design = Plan(
                 title: "Design Review", planDescription: "UI polish", emoji: "🎨"
             )
             let lunch = Plan(
-                title: "Lunch", planDescription: "Salad run", emoji: "🥗")
+                title: "Lunch", planDescription: "Quick bite", emoji: "🥗")
             let walk = Plan(
-                title: "Walk", planDescription: "Get steps", emoji: "🚶")
-            let feature = Plan(
-                title: "Feature Build", planDescription: "Tickets 123/124",
-                emoji: "🛠️")
-            let screen = Plan(
-                title: "Hiring Screen", planDescription: "30 min", emoji: "🧪")
-            let sync = Plan(
-                title: "Team Sync", planDescription: "Asks / blockers",
-                emoji: "🤝")
-            let breakTime = Plan(
-                title: "Break", planDescription: "Tea", emoji: "🫖")
-            let codeRev = Plan(
-                title: "Code Review", planDescription: "Peers' PRs", emoji: "🧯")
+                title: "Walk", planDescription: "10–15 min", emoji: "🚶")
+            let pairing = Plan(
+                title: "Pairing", planDescription: "Debug together", emoji: "🤝")
+            let review = Plan(
+                title: "Code Review", planDescription: "PRs / QA", emoji: "🔍")
             let client = Plan(
                 title: "Client Project", planDescription: "Milestone",
                 emoji: "🏗️")
+            let deepPM = Plan(
+                title: "Deep Work B", planDescription: "Refactor", emoji: "🧠")
             let gym = Plan(
                 title: "Gym", planDescription: "Pull day", emoji: "🏋️")
             let groceries = Plan(
                 title: "Groceries", planDescription: "Market run", emoji: "🛒")
-            let family = Plan(
-                title: "Family Time", planDescription: "Play & talk", emoji: "👨‍👩‍👧"
-            )
-            let cooking = Plan(
-                title: "Cooking", planDescription: "Dinner", emoji: "🍲")
-            let cleanup = Plan(
-                title: "Cleanup", planDescription: "Kitchen", emoji: "🧽")
-            let sideProj = Plan(
-                title: "Side Project", planDescription: "Prototype", emoji: "🧪")
-            let reading = Plan(
-                title: "Reading", planDescription: "Novel / docs", emoji: "📚")
             let windDown = Plan(
-                title: "Wind Down", planDescription: "Stretch & plan",
-                emoji: "🛌")
+                title: "Wind Down", planDescription: "Read & prep", emoji: "🛌")
 
-            // Schedule with **intentional overlaps** across the whole day
-            var blocks: [ScheduledPlan] = [
-                // 06:00–06:45 Morning routine
-                ScheduledPlan(
-                    plan: morning, startTime: at(6, 0), duration: mins(45)),
-                // 06:30–07:30 Breakfast (overlaps morning 06:30–06:45)
-                ScheduledPlan(
-                    plan: breakfast, startTime: at(6, 30), duration: mins(60)),
-                // 06:50–07:40 Podcast (overlaps breakfast 06:50–07:30)
-                ScheduledPlan(
-                    plan: podcast, startTime: at(6, 50), duration: mins(50)),
+            // Palette (high-contrast, loops if more plans than colors)
+            let colors: [String] = PreviewPalette.base8
+            let plans = [
+                wake, coffee, emails, standup, planning, deepAM, design, lunch,
+                walk, pairing, review, client, deepPM, gym, groceries, windDown,
+            ]
+            for (i, p) in plans.enumerated() {
+                p.colorHex = colors[i % colors.count]
+            }
 
-                // 08:00–09:30 Commute
+            // Schedule (light overlaps throughout the day)
+            let blocks: [ScheduledPlan] = [
                 ScheduledPlan(
-                    plan: commute, startTime: at(8, 0), duration: mins(90)),
-                // 08:15–08:45 Emails (overlaps commute)
+                    plan: wake, startTime: at(6, 45), duration: mins(20)),
                 ScheduledPlan(
-                    plan: emails, startTime: at(8, 15), duration: mins(30)),
-
-                // 09:00–10:00 Standup
+                    plan: coffee, startTime: at(7, 5), duration: mins(15)),
                 ScheduledPlan(
-                    plan: standup, startTime: at(9, 0), duration: mins(60)),
-                // 09:30–10:15 1:1 (overlaps standup)
+                    plan: emails, startTime: at(8, 0), duration: mins(40)),
                 ScheduledPlan(
-                    plan: oneOnOne, startTime: at(9, 30), duration: mins(45)),
-
-                // 10:00–12:00 Deep work
+                    plan: standup, startTime: at(9, 0), duration: mins(30)),
                 ScheduledPlan(
-                    plan: deep, startTime: at(10, 0), duration: mins(120)),
-                // 10:30–11:15 PR Review (overlaps deep)
+                    plan: planning, startTime: at(9, 15), duration: mins(45)),  // overlaps standup a bit
                 ScheduledPlan(
-                    plan: prReview, startTime: at(10, 30), duration: mins(45)),
-                // 11:00–11:45 Design review (overlaps deep)
+                    plan: deepAM, startTime: at(9, 45), duration: mins(120)),
                 ScheduledPlan(
-                    plan: designRev, startTime: at(11, 0), duration: mins(45)),
-
-                // 12:00–13:00 Lunch
+                    plan: design, startTime: at(10, 30), duration: mins(50)),  // overlaps deepAM
                 ScheduledPlan(
-                    plan: lunch, startTime: at(12, 0), duration: mins(60)),
-                // 12:15–12:45 Walk (overlaps lunch)
+                    plan: lunch, startTime: at(12, 0), duration: mins(45)),
                 ScheduledPlan(
-                    plan: walk, startTime: at(12, 15), duration: mins(30)),
-
-                // 13:00–15:30 Feature build
+                    plan: walk, startTime: at(12, 30), duration: mins(20)),  // overlaps lunch tail
                 ScheduledPlan(
-                    plan: feature, startTime: at(13, 0), duration: mins(150)),
-                // 13:30–14:00 Hiring screen (overlaps feature)
+                    plan: pairing, startTime: at(13, 0), duration: mins(45)),
                 ScheduledPlan(
-                    plan: screen, startTime: at(13, 30), duration: mins(30)),
-                // 14:30–15:00 Team sync (overlaps feature)
+                    plan: review, startTime: at(13, 30), duration: mins(60)),  // overlaps pairing
                 ScheduledPlan(
-                    plan: sync, startTime: at(14, 30), duration: mins(30)),
-
-                // 15:30–16:00 Break
+                    plan: client, startTime: at(14, 30), duration: mins(90)),
                 ScheduledPlan(
-                    plan: breakTime, startTime: at(15, 30), duration: mins(30)),
-                // 15:45–16:30 Code review (overlaps break 15:45–16:00)
-                ScheduledPlan(
-                    plan: codeRev, startTime: at(15, 45), duration: mins(45)),
-
-                // 16:00–18:00 Client work
-                ScheduledPlan(
-                    plan: client, startTime: at(16, 0), duration: mins(120)),
-
-                // 18:00–19:00 Gym
+                    plan: deepPM, startTime: at(15, 30), duration: mins(75)),  // overlaps client
                 ScheduledPlan(
                     plan: gym, startTime: at(18, 0), duration: mins(60)),
-                // 18:30–19:15 Groceries (overlaps gym)
                 ScheduledPlan(
-                    plan: groceries, startTime: at(18, 30), duration: mins(45)),
-
-                // 19:00–21:00 Family time
+                    plan: groceries, startTime: at(19, 15), duration: mins(35)),
                 ScheduledPlan(
-                    plan: family, startTime: at(19, 0), duration: mins(120)),
-                // 19:30–20:00 Cooking (overlaps family)
-                ScheduledPlan(
-                    plan: cooking, startTime: at(19, 30), duration: mins(30)),
-                // 20:30–21:00 Cleanup (overlaps family)
-                ScheduledPlan(
-                    plan: cleanup, startTime: at(20, 30), duration: mins(30)),
-
-                // 21:00–22:30 Side project
-                ScheduledPlan(
-                    plan: sideProj, startTime: at(21, 0), duration: mins(90)),
-                // 21:15–21:45 Reading (overlaps side project)
-                ScheduledPlan(
-                    plan: reading, startTime: at(21, 15), duration: mins(30)),
-
-                // 22:30–23:00 Wind down
-                ScheduledPlan(
-                    plan: windDown, startTime: at(22, 30), duration: mins(30)),
+                    plan: windDown, startTime: at(21, 0), duration: mins(45)),
             ]
 
-            // Optionally mark a dynamic "current" block starting ~10m ago for realism
-            let current = ScheduledPlan(
-                plan: sync,
-                startTime: cal.date(byAdding: .minute, value: -10, to: now)!,
-                duration: mins(50))
-            blocks.append(current)
-
-            // Persist
             let tpl = DayTemplate(
-                name: "Overlap Day (Full)", startTime: startOfDay)
+                name: "Overlap Day (Expanded)", startTime: startOfDay)
             tpl.scheduledPlans = blocks
+            let assignment = assignToday(tpl)
 
-            // Assign to today (Monday-based mapping like before)
-            let wdApple = cal.component(.weekday, from: now)
-            let mondayBased = ((wdApple + 5) % 7) + 1
-            let weekday = Weekday(rawValue: mondayBased) ?? .monday
-            let assignment = WeekdayAssignment(weekday: weekday, template: tpl)
-
-            // Insert all
-            [
-                morning, breakfast, podcast, commute, emails, standup, oneOnOne,
-                deep, prReview, designRev,
-                lunch, walk, feature, screen, sync, breakTime, codeRev, client,
-                gym, groceries,
-                family, cooking, cleanup, sideProj, reading, windDown,
-            ].forEach { ctx.insert($0) }
+            plans.forEach { ctx.insert($0) }
             blocks.forEach { ctx.insert($0) }
             ctx.insert(tpl)
             ctx.insert(assignment)
