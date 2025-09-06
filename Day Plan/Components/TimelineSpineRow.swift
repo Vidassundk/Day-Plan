@@ -231,27 +231,27 @@ struct TimelineSpineRow: View {
                             ? UnitPoint(x: 0.5, y: -1.0)  // 2× .top
                             : .top
 
+                        let endPt: UnitPoint =
+                            neighborIsTint
+                            ? .bottom  // 2× .top
+                            : .center
+
                         let g = LinearGradient(
                             colors: [from, planTint],
                             startPoint: startPt,
-                            endPoint: .bottom
+                            endPoint: endPt
                         )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     }
 
                 case .upcoming:
-                    if isFirst {
-                        let g = LinearGradient(
-                            colors: [separator.opacity(0), separator],
-                            startPoint: .top, endPoint: .center)
-                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
-                    } else {
-                        vline(cx: cx, fromY: 0, toY: topEndY, style: separator)
-                    }
+                    vline(cx: cx, fromY: 0, toY: topEndY, style: separator)
+
                 }
 
                 // --- BOTTOM SEGMENT ---
                 switch status {
+
                 case .past:
                     if isLast {
                         let g = LinearGradient(
@@ -267,39 +267,52 @@ struct TimelineSpineRow: View {
                     }
 
                 case .current:
-                    if let mid = bottomJunctionMid {
-                        // ACTIVE → ACTIVE below: full-span blend from my tint to the shared mid
-                        let g = LinearGradient(
-                            colors: [planTint, mid],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        vline(
-                            cx: cx, fromY: bottomStartY - px, toY: h + px,
-                            style: g)
-                    } else {
-                        // If the target is a real tint (not primary/separator), use 2× .bottom
-                        let target = bottomToColor ?? separator
-                        let neighborIsTint =
-                            !(target == .primary || target == separator)
-                        let endPt: UnitPoint =
-                            neighborIsTint
-                            ? UnitPoint(x: 0.5, y: 2.0)  // 2× .bottom
-                            : .bottom
 
-                        let g = LinearGradient(
-                            colors: [planTint, target],
-                            startPoint: .top,
-                            endPoint: endPt
-                        )
-                        vline(
-                            cx: cx, fromY: bottomStartY - px, toY: h + px,
-                            style: g)
+                    if !isLast {
+                        if let mid = bottomJunctionMid {
+                            // ACTIVE → ACTIVE below: full-span blend from my tint to the shared mid
+                            let g = LinearGradient(
+                                colors: [planTint, mid],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                            vline(
+                                cx: cx, fromY: bottomStartY - px, toY: h + px,
+                                style: g)
+                        } else {
+                            // If the target is a real tint (not primary/separator), use 2× .bottom
+                            let target = bottomToColor ?? separator
+                            let neighborIsTint =
+                                !(target == .primary || target == separator)
+
+                            let startPt: UnitPoint =
+                                neighborIsTint
+                                ? .top  // 2× .top
+                                : .center
+
+                            let endPt: UnitPoint =
+                                neighborIsTint
+                                ? UnitPoint(x: 0.5, y: 2.0)  // 2× .bottom
+                                : .bottom
+
+                            let g = LinearGradient(
+                                colors: [planTint, target],
+                                startPoint: startPt,
+                                endPoint: endPt
+                            )
+                            vline(
+                                cx: cx, fromY: bottomStartY - px, toY: h + px,
+                                style: g)
+
+                        }
                     }
 
                 case .upcoming:
-                    vline(
-                        cx: cx, fromY: bottomStartY, toY: h + px,
-                        style: separator)
+                    if !isLast {
+                        vline(
+                            cx: cx, fromY: bottomStartY, toY: h + px,
+                            style: separator)
+
+                    }
                 }
 
                 // --- DOT ---
