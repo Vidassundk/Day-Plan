@@ -3,6 +3,7 @@ import SwiftData
 import SwiftUI
 
 struct TodayTimelineView: View {
+
     @Environment(\.modelContext) private var modelContext
     let templateID: UUID
 
@@ -32,7 +33,7 @@ struct TodayTimelineView: View {
                 let dayEnd = dayStart.addingTimeInterval(24 * 60 * 60)
 
                 TimelineView(.periodic(from: .now, by: tick)) { ctx in
-                    let plans = fetchPlans()  // fresh each tick; small dataset is fine
+                    let plans = fetchPlans()  // small dataset; refresh per tick
                     let anchoredNow = TimeUtil.anchoredTime(
                         ctx.date, to: dayStart)
                     let now = min(max(anchoredNow, dayStart), dayEnd)
@@ -46,19 +47,11 @@ struct TodayTimelineView: View {
                         (gutterMode == .show)
                         || (gutterMode == .auto && !dayComplete)
 
-                    let active = plans.indices.filter { i in
-                        let sp = plans[i]
-                        let end = sp.startTime.addingTimeInterval(sp.duration)
-                        return now >= sp.startTime && now < end
-                    }
-                    let primaryActiveIndex = active.last
-
                     TimelineList(
                         plans: plans,
                         dayStart: dayStart,
                         now: now,
-                        showSpine: showSpine,
-                        primaryActiveIndex: primaryActiveIndex
+                        showSpine: showSpine
                     )
                 }
             } else {
@@ -70,8 +63,7 @@ struct TodayTimelineView: View {
         .id(templateID)
     }
 
-    // MARK: - Optional controls
-
+    // MARK: - Optional controls (kept, not shown by default)
     private var controlRow: some View {
         HStack(spacing: 12) {
             Image(systemName: "line.3.horizontal.decrease.circle")
@@ -96,7 +88,28 @@ struct TodayTimelineView: View {
         let dayStart: Date
         let now: Date
         let showSpine: Bool
-        let primaryActiveIndex: Int?
+
+        // local status helper
+        enum S { case past, current, upcoming }
+
+        func status(of sp: ScheduledPlan) -> S {
+            let start = sp.startTime
+            let end = sp.startTime.addingTimeInterval(sp.duration)
+            if now < start { return .upcoming }
+            if now >= start && now < end { return .current }
+            return .past
+        }
+
+        // The “output color” a row would paint into the spine (used as neighbor hint)
+        // Matches the simplified rules:
+        //   past -> .primary, current -> plan.tint, upcoming -> .separator
+        func outputColor(for sp: ScheduledPlan) -> Color {
+            switch status(of: sp) {
+            case .past: return .primary
+            case .current: return sp.plan?.tintColor ?? .accentColor
+            case .upcoming: return Color(uiColor: .separator)
+            }
+        }
 
         var body: some View {
             if plans.isEmpty {
@@ -119,6 +132,19 @@ struct TodayTimelineView: View {
 
                         ForEach(plans.indices, id: \.self) { i in
                             let sp = plans[i]
+                            let st = status(of: sp)
+
+                            // Neighbor blend hints
+                            let topFrom: Color? = {
+                                guard i > 0 else { return nil }
+                                return outputColor(for: plans[i - 1])
+                            }()
+
+                            let bottomTo: Color? = {
+                                guard i < plans.count - 1 else { return nil }
+                                return outputColor(for: plans[i + 1])
+                            }()
+
                             TimelineSpineRow(
                                 sp: sp,
                                 isFirst: i == 0,
@@ -126,7 +152,8 @@ struct TodayTimelineView: View {
                                 dayStart: dayStart,
                                 now: now,
                                 showSpine: showSpine,
-                                isPrimaryCurrent: (i == primaryActiveIndex)
+                                topFromColor: topFrom,
+                                bottomToColor: bottomTo
                             )
 
                             // Between-plan gap if now lies between this plan's end and next plan's start
@@ -190,8 +217,8 @@ struct TodayTimelineView: View {
 
             let a = Plan(
                 title: "Standup", planDescription: "Sprint 42", emoji: "👥")
-            let b = Plan(
-                title: "Lunch", planDescription: "Chicken salad", emoji: "🥗")
+            let b = Plan(title: "Design", planDescription: "Review", emoji: "🎨")
+            let c = Plan(title: "Workout", planDescription: "Push", emoji: "💪")
 
             let sp1 = ScheduledPlan(
                 plan: a,
@@ -200,24 +227,32 @@ struct TodayTimelineView: View {
             let sp2 = ScheduledPlan(
                 plan: b,
                 startTime: cal.date(
-                    byAdding: .hour, value: 12, to: startOfDay)!,
+                    byAdding: .hour, value: 10, to: startOfDay)!,
                 duration: 60 * 60)
+            let sp3 = ScheduledPlan(
+                plan: c,
+                startTime: cal.date(
+                    byAdding: .hour, value: 10, to: startOfDay)!,
+                duration: 90 * 60)
 
             let tpl = DayTemplate(name: "Sample Day", startTime: startOfDay)
-            tpl.scheduledPlans = [sp1, sp2]
+            tpl.scheduledPlans = [sp1, sp2, sp3]
             sp1.dayTemplate = tpl
             sp2.dayTemplate = tpl
+            sp3.dayTemplate = tpl
 
             ctx.insert(a)
             ctx.insert(b)
+            ctx.insert(c)
             ctx.insert(sp1)
             ctx.insert(sp2)
+            ctx.insert(sp3)
             ctx.insert(tpl)
             try? ctx.save()
 
             return TodayTimelineView(templateID: tpl.id)
                 .modelContainer(container)
-                .previewDisplayName("TodayTimelineView — by ID")
+                .previewDisplayName("TodayTimelineView — simplified spine")
         }
     }
 #endif

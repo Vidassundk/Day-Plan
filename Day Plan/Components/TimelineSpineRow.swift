@@ -1,12 +1,5 @@
-// TimelineSpineRow.swift
-// Spine uses text color (Color.primary) for past/active segments
-
 import SwiftData
 import SwiftUI
-
-// Render rule for overlaps:
-// - Only the *primary* current row (passed in) shows a half-filled spine.
-// - Other current rows render the spine as fully filled (like past), BUT keep the dot.
 
 struct TimelineSpineRow: View {
     let sp: ScheduledPlan
@@ -15,7 +8,15 @@ struct TimelineSpineRow: View {
     let dayStart: Date
     let now: Date
     let showSpine: Bool
-    let isPrimaryCurrent: Bool
+
+    // Neighbor color hints (kept, used for non-active neighbors)
+    let topFromColor: Color?
+    let bottomToColor: Color?
+
+    // NEW: single-color hinge right at the junction when the neighbor is ACTIVE.
+    // If set, we draw ...tint→mid... (on bottom) or ...mid→tint... (on top).
+    let topJunctionMid: Color?
+    let bottomJunctionMid: Color?
 
     init(
         sp: ScheduledPlan,
@@ -24,7 +25,10 @@ struct TimelineSpineRow: View {
         dayStart: Date,
         now: Date,
         showSpine: Bool = true,
-        isPrimaryCurrent: Bool = false
+        topFromColor: Color? = nil,
+        bottomToColor: Color? = nil,
+        topJunctionMid: Color? = nil,
+        bottomJunctionMid: Color? = nil
     ) {
         self.sp = sp
         self.isFirst = isFirst
@@ -32,7 +36,10 @@ struct TimelineSpineRow: View {
         self.dayStart = dayStart
         self.now = now
         self.showSpine = showSpine
-        self.isPrimaryCurrent = isPrimaryCurrent
+        self.topFromColor = topFromColor
+        self.bottomToColor = bottomToColor
+        self.topJunctionMid = topJunctionMid
+        self.bottomJunctionMid = bottomJunctionMid
     }
 
     // Layout
@@ -42,10 +49,9 @@ struct TimelineSpineRow: View {
     private let lineWidth: CGFloat = 2
     private let gutterAnimDuration: Double = 0.32
 
-    // Timeline status
+    // Status
     private var start: Date { sp.startTime }
     private var end: Date { sp.startTime.addingTimeInterval(sp.duration) }
-
     private enum Status { case past, current, upcoming }
     private var status: Status {
         if now < start { return .upcoming }
@@ -53,7 +59,7 @@ struct TimelineSpineRow: View {
         return .past
     }
 
-    // Live progress (source of truth)
+    // Progress
     private var liveProgress: Double {
         guard status == .current else { return 0 }
         let total = end.timeIntervalSince(start)
@@ -61,7 +67,7 @@ struct TimelineSpineRow: View {
         return min(1, max(0, now.timeIntervalSince(start) / total))
     }
 
-    // Animation coordination
+    // Anim
     @State private var displayedProgress: Double = 0
     @State private var isCollapsing = false
     @State private var currentGutter: CGFloat = 0
@@ -69,9 +75,10 @@ struct TimelineSpineRow: View {
     // Colors
     private var separator: Color { Color(uiColor: .separator) }
     private var planTint: Color { sp.plan?.tintColor ?? .accentColor }
-    private var dotColor: Color {
-        status == .current ? planTint : .secondary  // gray when not active
-    }
+
+    // Dot
+    private var showDot: Bool { status != .past }
+    private var dotColor: Color { status == .current ? planTint : separator }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -106,9 +113,8 @@ struct TimelineSpineRow: View {
         }
         .onChange(of: showSpine) { newValue in
             isCollapsing = true
-            let target = newValue ? (leftColumnWidth + gapWidth) : 0
             withAnimation(.easeInOut(duration: gutterAnimDuration)) {
-                currentGutter = target
+                currentGutter = newValue ? (leftColumnWidth + gapWidth) : 0
             }
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + gutterAnimDuration + 0.02
@@ -130,8 +136,7 @@ struct TimelineSpineRow: View {
                 if status == .current {
                     Text("Now")
                         .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(
                             Color.accentColor.opacity(0.15), in: Capsule()
                         )
@@ -152,7 +157,7 @@ struct TimelineSpineRow: View {
             if status == .current {
                 ProgressView(value: displayedProgress)
                     .progressViewStyle(.linear)
-                    .tint(planTint)  // progress matches plan
+                    .tint(planTint)
                     .animation(
                         isCollapsing ? nil : .linear(duration: 0.6),
                         value: displayedProgress
@@ -177,188 +182,127 @@ struct TimelineSpineRow: View {
                 let h = geo.size.height
                 let cx = max(1, geo.size.width / 2)
                 let cy = h / 2
-
-                let isPast = (status == .past)
-                let isActive = (status == .current)
-
-                // Overlaps: non-primary currents look like "past" on the spine, but keep the dot.
-                let isSecondaryCurrent = isActive && !isPrimaryCurrent
-                let treatAsPastForSpine = isPast || isSecondaryCurrent
-                let showDot = (status != .past) || isSecondaryCurrent
+                let px: CGFloat = 1 / UIScreen.main.scale
+                let hingeWidth: CGFloat = 0.18
 
                 let topEndY: CGFloat = showDot ? (cy - dotSize / 2) : cy
                 let bottomStartY: CGFloat = showDot ? (cy + dotSize / 2) : cy
 
+                let minFadePts: CGFloat = 14  // at least 14pt of visible fade
+                let topLen = max(topEndY, 1)
+                let topHinge = min(0.55, max(0.22, minFadePts / topLen))  // 22–55% of segment
+
                 // --- TOP SEGMENT ---
-                if isFirst {
-                    if treatAsPastForSpine {
-                        // first + past OR first + secondary current → clear → primary
-                        let fadePrimary = LinearGradient(
-                            colors: [Color.primary.opacity(0), Color.primary],
-                            startPoint: .top, endPoint: .center
-                        )
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: 0))
-                            p.addLine(to: CGPoint(x: cx, y: topEndY))
-                        }
-                        .stroke(
-                            fadePrimary,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
-
-                    } else if (status == .current) && isPrimaryCurrent {
-                        // first + PRIMARY current → clear → plan tint
-                        let fadeToPlan = LinearGradient(
-                            colors: [
-                                Color.primary.opacity(0),
-                                planTint.opacity(0.95),
-                            ],
-                            startPoint: .top, endPoint: .center
-                        )
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: 0))
-                            p.addLine(to: CGPoint(x: cx, y: topEndY))
-                        }
-                        .stroke(
-                            fadeToPlan,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
-
+                switch status {
+                case .past:
+                    if isFirst {
+                        let g = LinearGradient(
+                            colors: [Color.primary.opacity(0), .primary],
+                            startPoint: .top, endPoint: .center)
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else {
-                        // first + upcoming → separator
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: 0))
-                            p.addLine(to: CGPoint(x: cx, y: topEndY))
-                        }
-                        .stroke(
-                            separator,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
+                        vline(
+                            cx: cx, fromY: 0, toY: topEndY, style: Color.primary
+                        )
                     }
 
-                } else if status == .current {
-                    // NON-FIRST + PRIMARY current:
-                    // 1) Base: solid primary so the spine above looks like text color
-                    Path { p in
-                        p.move(to: CGPoint(x: cx, y: 0))
-                        p.addLine(to: CGPoint(x: cx, y: topEndY))
+                case .current:
+                    // --- TOP SEGMENT ---  (.current)
+                    if isFirst {
+                        let g = LinearGradient(
+                            colors: [Color.primary.opacity(0), planTint],
+                            startPoint: .top, endPoint: .center
+                        )
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
+                    } else if let mid = topJunctionMid {
+                        // ACTIVE above → full-span blend from shared mid to my tint
+                        let g = LinearGradient(
+                            colors: [mid, planTint],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
+                    } else {
+                        // If the "from" color is a real tint (not primary/separator), use 2× .top
+                        let from = topFromColor ?? .primary
+                        let neighborIsTint =
+                            !(from == .primary || from == separator)
+                        let startPt: UnitPoint =
+                            neighborIsTint
+                            ? UnitPoint(x: 0.5, y: -1.0)  // 2× .top
+                            : .top
+
+                        let g = LinearGradient(
+                            colors: [from, planTint],
+                            startPoint: startPt,
+                            endPoint: .bottom
+                        )
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     }
-                    .stroke(
-                        Color.primary,
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
-                    )
 
-                    // 2) Overlay: transparent → planTint halo near the dot
-                    let pathHeight = max(1, topEndY)
-                    let haloLen: CGFloat = 28  // px of tint near dot
-                    let haloStart = max(0, 1 - (haloLen / pathHeight))
-
-                    let halo = LinearGradient(
-                        gradient: Gradient(stops: [
-                            .init(color: planTint.opacity(0), location: 0.0),
-                            .init(color: planTint.opacity(1), location: 1.0),
-                        ]),
-                        startPoint: .top, endPoint: .center
-                    )
-
-                    Path { p in
-                        p.move(to: CGPoint(x: cx, y: 0))
-                        p.addLine(to: CGPoint(x: cx, y: topEndY))
+                case .upcoming:
+                    if isFirst {
+                        let g = LinearGradient(
+                            colors: [separator.opacity(0), separator],
+                            startPoint: .top, endPoint: .center)
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: g)
+                    } else {
+                        vline(cx: cx, fromY: 0, toY: topEndY, style: separator)
                     }
-                    .stroke(
-                        halo,
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
-                    )
-
-                } else if treatAsPastForSpine {
-                    // non-first + past OR non-first + secondary current → solid primary
-                    Path { p in
-                        p.move(to: CGPoint(x: cx, y: 0))
-                        p.addLine(to: CGPoint(x: cx, y: topEndY))
-                    }
-                    .stroke(
-                        Color.primary,
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
-                    )
-
-                } else {
-                    // non-first + upcoming → separator
-                    Path { p in
-                        p.move(to: CGPoint(x: cx, y: 0))
-                        p.addLine(to: CGPoint(x: cx, y: topEndY))
-                    }
-                    .stroke(
-                        separator,
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
-                    )
                 }
 
                 // --- BOTTOM SEGMENT ---
-                let px = 1 / UIScreen.main.scale
-
-                if isLast {
-                    if status == .past {
-                        // last + past → primary → clear
-                        let fadeOut = LinearGradient(
-                            colors: [Color.primary, Color.primary.opacity(0)],
-                            startPoint: .center, endPoint: .bottom
-                        )
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))  // slight overshoot
-                        }
-                        .stroke(
-                            fadeOut,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
+                switch status {
+                case .past:
+                    if isLast {
+                        let g = LinearGradient(
+                            colors: [.primary, Color.primary.opacity(0)],
+                            startPoint: .center, endPoint: .bottom)
+                        vline(
+                            cx: cx, fromY: bottomStartY - px, toY: h + px,
+                            style: g)
                     } else {
-                        // last + NOT past → draw nothing
+                        vline(
+                            cx: cx, fromY: bottomStartY - px, toY: h + px,
+                            style: Color.primary)
                     }
-                } else {
-                    if isActive {
-                        let y0 = bottomStartY - px
-                        let y1 = h + px
 
-                        let fadeActive = LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: planTint, location: 0.0),
-                                .init(color: separator, location: 1.0),
-                            ]),
+                case .current:
+                    if let mid = bottomJunctionMid {
+                        // ACTIVE → ACTIVE below: full-span blend from my tint to the shared mid
+                        let g = LinearGradient(
+                            colors: [planTint, mid],
                             startPoint: .top, endPoint: .bottom
                         )
-
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: y0))
-                            p.addLine(to: CGPoint(x: cx, y: y1))
-                        }
-                        .stroke(
-                            fadeActive,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
-
-                    } else if treatAsPastForSpine {
-                        // past/secondary current → solid primary
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY - px))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            Color.primary,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
+                        vline(
+                            cx: cx, fromY: bottomStartY - px, toY: h + px,
+                            style: g)
                     } else {
-                        // upcoming
-                        Path { p in
-                            p.move(to: CGPoint(x: cx, y: bottomStartY))
-                            p.addLine(to: CGPoint(x: cx, y: h + px))
-                        }
-                        .stroke(
-                            separator,
-                            style: StrokeStyle(
-                                lineWidth: lineWidth, lineCap: .butt))
+                        // If the target is a real tint (not primary/separator), use 2× .bottom
+                        let target = bottomToColor ?? separator
+                        let neighborIsTint =
+                            !(target == .primary || target == separator)
+                        let endPt: UnitPoint =
+                            neighborIsTint
+                            ? UnitPoint(x: 0.5, y: 2.0)  // 2× .bottom
+                            : .bottom
+
+                        let g = LinearGradient(
+                            colors: [planTint, target],
+                            startPoint: .top,
+                            endPoint: endPt
+                        )
+                        vline(
+                            cx: cx, fromY: bottomStartY - px, toY: h + px,
+                            style: g)
                     }
+
+                case .upcoming:
+                    vline(
+                        cx: cx, fromY: bottomStartY, toY: h + px,
+                        style: separator)
                 }
 
+                // --- DOT ---
                 if showDot {
                     Circle()
                         .fill(dotColor)
@@ -371,8 +315,18 @@ struct TimelineSpineRow: View {
         }
     }
 
-    // MARK: - Accessibility
+    // Helper
+    private func vline<S: ShapeStyle>(
+        cx: CGFloat, fromY: CGFloat, toY: CGFloat, style: S
+    ) -> some View {
+        Path { p in
+            p.move(to: CGPoint(x: cx, y: fromY))
+            p.addLine(to: CGPoint(x: cx, y: toY))
+        }
+        .stroke(style, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+    }
 
+    // Accessibility
     private var accessibilityText: Text {
         let title = Text(sp.plan?.title ?? "Untitled")
         let time = Text(
@@ -394,9 +348,8 @@ enum TimelineGapKind { case between, beforeFirst }
 struct TimelineGapRow: View {
     let minutesUntil: Int
     let showSpine: Bool
-    let kind: TimelineGapKind  // between rows, or before the first plan
+    let kind: TimelineGapKind
 
-    // Match TimelineSpineRow layout
     private let leftColumnWidth: CGFloat = 28
     private let gapWidth: CGFloat = 12
     private let lineWidth: CGFloat = 2
@@ -448,15 +401,13 @@ struct TimelineGapRow: View {
             .padding(.vertical, 6)
     }
 
-    @ViewBuilder
-    private var spine: some View {
+    @ViewBuilder private var spine: some View {
         GeometryReader { geo in
             let h = geo.size.height
             let cx = max(1, geo.size.width / 2)
 
             switch kind {
             case .between:
-                // Base: full separator line
                 Path { p in
                     p.move(to: CGPoint(x: cx, y: 0))
                     p.addLine(to: CGPoint(x: cx, y: h))
@@ -465,7 +416,6 @@ struct TimelineGapRow: View {
                     separator,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
 
-                // Overlay: primary → transparent (top-to-bottom) to match past/active spine color
                 let fadePrimary = LinearGradient(
                     gradient: Gradient(stops: [
                         .init(color: .primary, location: 0.0),
@@ -482,7 +432,6 @@ struct TimelineGapRow: View {
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
 
             case .beforeFirst:
-                // transparent → separator (top-to-bottom)
                 let fadeSeparatorIn = LinearGradient(
                     gradient: Gradient(stops: [
                         .init(color: separator.opacity(0), location: 0.0),
@@ -503,61 +452,3 @@ struct TimelineGapRow: View {
         .accessibilityHidden(true)
     }
 }
-
-#if DEBUG
-    import SwiftUI
-
-    struct TimelineSpineRow_Previews: PreviewProvider {
-        static var previews: some View {
-            let cal = Calendar.current
-            let startOfDay = cal.startOfDay(for: .now)
-            let now = Date()
-
-            let p1 = Plan(
-                title: "Standup", planDescription: "Sprint 42", emoji: "👥")
-            let p2 = Plan(
-                title: "Design Review", planDescription: "New UI", emoji: "🎨")
-            let p3 = Plan(
-                title: "Workout", planDescription: "Push day", emoji: "💪")
-
-            let past = ScheduledPlan(
-                plan: p1,
-                startTime: cal.date(byAdding: .hour, value: 8, to: startOfDay)!,
-                duration: 60 * 60
-            )
-            let currentPrimary = ScheduledPlan(
-                plan: p2,
-                startTime: cal.date(
-                    byAdding: .hour, value: 10, to: startOfDay)!,
-                duration: 90 * 60
-            )
-            let currentSecondary = ScheduledPlan(
-                plan: p3,
-                startTime: cal.date(
-                    byAdding: .hour, value: 10, to: startOfDay)!,
-                duration: 60 * 60
-            )
-
-            return VStack(alignment: .leading, spacing: 0) {
-                TimelineSpineRow(
-                    sp: past, isFirst: true, isLast: false,
-                    dayStart: startOfDay, now: now, showSpine: true,
-                    isPrimaryCurrent: false
-                )
-                TimelineSpineRow(
-                    sp: currentPrimary, isFirst: false, isLast: false,
-                    dayStart: startOfDay, now: now, showSpine: true,
-                    isPrimaryCurrent: true
-                )
-                TimelineSpineRow(
-                    sp: currentSecondary, isFirst: false, isLast: true,
-                    dayStart: startOfDay, now: now, showSpine: true,
-                    isPrimaryCurrent: false
-                )
-            }
-            .padding()
-            .previewDisplayName(
-                "Spine — Primary vs Secondary Current (plan halo via overlay)")
-        }
-    }
-#endif
