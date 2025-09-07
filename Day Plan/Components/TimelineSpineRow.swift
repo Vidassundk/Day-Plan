@@ -42,12 +42,48 @@ struct TimelineSpineRow: View {
         self.bottomJunctionMid = bottomJunctionMid
     }
 
-    // Layout
-    private let leftColumnWidth: CGFloat = 28
+    private enum DotStyle { case circle, squircle }
+    private let dotStyle: DotStyle = .squircle
+
+    // Corner radius ~app-icon feel; tweak 0.27–0.33 to taste
+    private var dotCornerRadius: CGFloat { dotDiameter * 0.40 }
+
+    private enum NowTagStyle { case subtleTint, solidTint }
+    private let nowTagStyle: NowTagStyle = .subtleTint  // change to .solidTint if you want a bolder look
+
+    private var nowTextColor: Color {
+        switch nowTagStyle {
+        case .subtleTint: return planTint
+        case .solidTint: return .white
+        }
+    }
+    private var nowBackground: some ShapeStyle {
+        switch nowTagStyle {
+        case .subtleTint: return planTint.opacity(0.16)
+        case .solidTint: return planTint
+        }
+    }
+    private var nowBorder: Color {
+        switch nowTagStyle {
+        case .subtleTint: return planTint.opacity(0.35)
+        case .solidTint: return planTint
+        }
+    }
+
     private let gapWidth: CGFloat = 12
-    private let dotSize: CGFloat = 12
     private let lineWidth: CGFloat = 2
     private let gutterAnimDuration: Double = 0.32
+
+    // Bigger dot to fit the emoji
+    private let dotDiameter: CGFloat = 30  // unchanged
+    private var dotEmojiScale: CGFloat { 0.48 }  // was ~0.58 → smaller emoji
+    private var dotContentInset: CGFloat { dotDiameter * 0.08 }  // padding inside the dot
+    private var dotEmojiFont: Font {
+        .system(size: dotDiameter * dotEmojiScale)
+    }
+    private let emojiBaselineNudge: CGFloat = -0.5  // tweak to taste (0, -0.5, -1)
+
+    private var leftColumnWidth: CGFloat { dotDiameter + 16 }  // keep some side padding
 
     // Status
     private var start: Date { sp.startTime }
@@ -72,13 +108,43 @@ struct TimelineSpineRow: View {
     @State private var isCollapsing = false
     @State private var currentGutter: CGFloat = 0
 
+    private var nowTag: some View {
+        HStack(spacing: 4) {
+
+            Text("Now")
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(nowTextColor)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(nowBackground, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(nowBorder, lineWidth: 1)
+        )
+        .shadow(
+            color: nowTagStyle == .solidTint ? planTint.opacity(0.25) : .clear,
+            radius: 3, y: 1
+        )
+        .accessibilityHidden(true)
+    }
+
     // Colors
     private var separator: Color { Color(uiColor: .separator) }
     private var planTint: Color { sp.plan?.tintColor ?? .accentColor }
 
     // Dot
     private var showDot: Bool { status != .past }
-    private var dotColor: Color { status == .current ? planTint : separator }
+
+    // Use plan tint for current and upcoming; hide for past
+    private var dotFill: Color {
+        switch status {
+        case .current: return planTint
+        case .upcoming: return separator  // ← changed from planTint.opacity(0.9)
+        case .past: return separator  // not used (showDot == false)
+        }
+
+    }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -129,23 +195,15 @@ struct TimelineSpineRow: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(sp.plan?.emoji ?? "🧩").font(.title3)
-                Text(sp.plan?.title ?? "Untitled").font(.headline)
+                // Emoji moved into the dot — keep only the title here
+                Text(sp.plan?.title ?? "Untitled")
+                    .font(.headline)
                 Spacer(minLength: 8)
 
                 if status == .current {
-                    Text("Now")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(
-                            Color.accentColor.opacity(0.15), in: Capsule()
-                        )
-                        .accessibilityHidden(true)
-                } else if status == .past {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
+                    nowTag
                 }
+
             }
 
             Text(
@@ -183,14 +241,10 @@ struct TimelineSpineRow: View {
                 let cx = max(1, geo.size.width / 2)
                 let cy = h / 2
                 let px: CGFloat = 1 / UIScreen.main.scale
-                let hingeWidth: CGFloat = 0.18
 
-                let topEndY: CGFloat = showDot ? (cy - dotSize / 2) : cy
-                let bottomStartY: CGFloat = showDot ? (cy + dotSize / 2) : cy
-
-                let minFadePts: CGFloat = 14  // at least 14pt of visible fade
-                let topLen = max(topEndY, 1)
-                let topHinge = min(0.55, max(0.22, minFadePts / topLen))  // 22–55% of segment
+                let topEndY: CGFloat = showDot ? (cy - dotDiameter / 2) : cy
+                let bottomStartY: CGFloat =
+                    showDot ? (cy + dotDiameter / 2) : cy
 
                 // --- TOP SEGMENT ---
                 switch status {
@@ -207,7 +261,6 @@ struct TimelineSpineRow: View {
                     }
 
                 case .current:
-                    // --- TOP SEGMENT ---  (.current)
                     if isFirst {
                         let g = LinearGradient(
                             colors: [Color.primary.opacity(0), planTint],
@@ -215,27 +268,19 @@ struct TimelineSpineRow: View {
                         )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else if let mid = topJunctionMid {
-                        // ACTIVE above → full-span blend from shared mid to my tint
                         let g = LinearGradient(
                             colors: [mid, planTint],
                             startPoint: .top, endPoint: .bottom
                         )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else {
-                        // If the "from" color is a real tint (not primary/separator), use 2× .top
                         let from = topFromColor ?? .primary
                         let neighborIsTint =
                             !(from == .primary || from == separator)
                         let startPt: UnitPoint =
-                            neighborIsTint
-                            ? UnitPoint(x: 0.5, y: -1.0)  // 2× .top
-                            : .top
-
+                            neighborIsTint ? UnitPoint(x: 0.5, y: -1.0) : .top
                         let endPt: UnitPoint =
-                            neighborIsTint
-                            ? .bottom  // 2× .top
-                            : .center
-
+                            neighborIsTint ? .bottom : .center
                         let g = LinearGradient(
                             colors: [from, planTint],
                             startPoint: startPt,
@@ -246,12 +291,10 @@ struct TimelineSpineRow: View {
 
                 case .upcoming:
                     vline(cx: cx, fromY: 0, toY: topEndY, style: separator)
-
                 }
 
                 // --- BOTTOM SEGMENT ---
                 switch status {
-
                 case .past:
                     if isLast {
                         let g = LinearGradient(
@@ -267,10 +310,8 @@ struct TimelineSpineRow: View {
                     }
 
                 case .current:
-
                     if !isLast {
                         if let mid = bottomJunctionMid {
-                            // ACTIVE → ACTIVE below: full-span blend from my tint to the shared mid
                             let g = LinearGradient(
                                 colors: [planTint, mid],
                                 startPoint: .top, endPoint: .bottom
@@ -279,21 +320,14 @@ struct TimelineSpineRow: View {
                                 cx: cx, fromY: bottomStartY - px, toY: h + px,
                                 style: g)
                         } else {
-                            // If the target is a real tint (not primary/separator), use 2× .bottom
                             let target = bottomToColor ?? separator
                             let neighborIsTint =
                                 !(target == .primary || target == separator)
-
                             let startPt: UnitPoint =
-                                neighborIsTint
-                                ? .top  // 2× .top
-                                : .center
-
+                                neighborIsTint ? .top : .center
                             let endPt: UnitPoint =
                                 neighborIsTint
-                                ? UnitPoint(x: 0.5, y: 2.0)  // 2× .bottom
-                                : .bottom
-
+                                ? UnitPoint(x: 0.5, y: 2.0) : .bottom
                             let g = LinearGradient(
                                 colors: [planTint, target],
                                 startPoint: startPt,
@@ -302,7 +336,6 @@ struct TimelineSpineRow: View {
                             vline(
                                 cx: cx, fromY: bottomStartY - px, toY: h + px,
                                 style: g)
-
                         }
                     }
 
@@ -311,17 +344,75 @@ struct TimelineSpineRow: View {
                         vline(
                             cx: cx, fromY: bottomStartY, toY: h + px,
                             style: separator)
-
                     }
                 }
 
-                // --- DOT ---
+                // --- BIG DOT WITH EMOJI ---
                 if showDot {
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: dotSize, height: dotSize)
-                        .position(x: cx, y: cy)
+                    Group {
+                        switch dotStyle {
+                        case .circle:
+                            Circle()
+                                .fill(dotFill)
+                                .frame(width: dotDiameter, height: dotDiameter)
+                                .overlay(
+                                    Circle()
+                                        .stroke(
+                                            Color(uiColor: .systemBackground)
+                                                .opacity(0.9), lineWidth: 2)
+                                )
+                                .overlay {
+                                    let side = dotDiameter - 2 * dotContentInset
+                                    Text(sp.plan?.emoji ?? "🧩")
+                                        .font(dotEmojiFont)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.5)
+                                        .frame(
+                                            width: side, height: side,
+                                            alignment: .center
+                                        )
+                                        .offset(y: emojiBaselineNudge)
+                                        .accessibilityHidden(true)
+                                }
+                                .shadow(
+                                    radius: status == .current ? 2 : 0, y: 1)
+
+                        case .squircle:
+                            RoundedRectangle(
+                                cornerRadius: dotCornerRadius,
+                                style: .continuous
+                            )
+                            .fill(dotFill)
+                            .frame(width: dotDiameter, height: dotDiameter)
+                            .overlay(
+                                RoundedRectangle(
+                                    cornerRadius: dotCornerRadius,
+                                    style: .continuous
+                                )
+                                .stroke(
+                                    Color(uiColor: .systemBackground).opacity(
+                                        0.9), lineWidth: 1)
+                            )
+                            .overlay {
+                                let side = dotDiameter - 2 * dotContentInset
+                                Text(sp.plan?.emoji ?? "🧩")
+                                    .font(dotEmojiFont)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.5)
+                                    .frame(
+                                        width: side, height: side,
+                                        alignment: .center
+                                    )
+                                    .offset(y: emojiBaselineNudge)
+                                    .accessibilityHidden(true)
+                            }
+                            .shadow(radius: status == .current ? 2 : 0, y: 1)
+                        }
+                    }
+                    .position(x: cx, y: cy)
+                    .drawingGroup()  // crisper edges when animating/scaling
                 }
+
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
@@ -363,7 +454,8 @@ struct TimelineGapRow: View {
     let showSpine: Bool
     let kind: TimelineGapKind
 
-    private let leftColumnWidth: CGFloat = 28
+    // Keep this in sync with TimelineSpineRow.leftColumnWidth (dotDiameter + 16)
+    private let leftColumnWidth: CGFloat = 46  // 30 + 16
     private let gapWidth: CGFloat = 12
     private let lineWidth: CGFloat = 2
     private let gutterAnimDuration: Double = 0.32

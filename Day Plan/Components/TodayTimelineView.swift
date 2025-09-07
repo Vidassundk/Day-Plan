@@ -175,7 +175,7 @@ struct TodayTimelineView: View {
                         }
                     }
                     .padding(.vertical, 8)
-                }
+                }.scrollIndicators(ScrollIndicatorVisibility.never)
             }
         }
 
