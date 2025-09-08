@@ -17,6 +17,8 @@ struct DayTemplateEditorView: View {
     // Shared add-plan sheet state
     @State private var showAddSheet = false
 
+    @State private var refreshID = UUID()
+
     // -------- CREATE MODE STATE --------
     @State private var name: String = ""
     @State private var drafts: [PlanEntryDraft] = []
@@ -89,6 +91,7 @@ struct DayTemplateEditorView: View {
                         scheduled.dayTemplate = template
                         modelContext.insert(scheduled)
                         try? modelContext.save()
+                        refreshID = UUID()
                     }
                 }
             }
@@ -185,6 +188,7 @@ struct DayTemplateEditorView: View {
                 template.name.isEmpty ? "Day Template" : template.name
             )
             .navigationBarTitleDisplayMode(.inline)
+            .id(refreshID)
         }
     }
 
