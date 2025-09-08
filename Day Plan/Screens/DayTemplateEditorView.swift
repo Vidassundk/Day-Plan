@@ -59,12 +59,41 @@ struct DayTemplateEditorView: View {
         }
     }
 
+    /// Suggest the next start time = end of the latest block in the current mode.
+    /// - Create: end of latest draft (clamped) or anchorDay if none
+    /// - Edit:   end of latest scheduled plan or anchorDay if none
+    private func suggestedInitialStart() -> Date {
+        let anchor = anchorDay
+        let endOfDay = anchor.addingTimeInterval(24 * 60 * 60)
+
+        let lastEnd: Date = {
+            switch mode {
+            case .create:
+                return drafts.map { d -> Date in
+                    let start = TimeUtil.anchoredTime(d.start, to: anchor)
+                    let clamped = clampMinutes(
+                        start: start, requestedMinutes: d.lengthMinutes)
+                    return start.addingTimeInterval(TimeInterval(clamped * 60))
+                }.max() ?? anchor
+
+            case .edit(let template):
+                return template.scheduledPlans
+                    .map { $0.startTime.addingTimeInterval($0.duration) }
+                    .max() ?? anchor
+            }
+        }()
+
+        // keep inside the same day; if it overflows, nudge to just before endOfDay
+        return min(lastEnd, endOfDay.addingTimeInterval(-60))
+    }
+
     var body: some View {
         content
             .sheet(isPresented: $showAddSheet) {
+                let initial = suggestedInitialStart()
                 AddOrReusePlanSheet(
                     anchorDay: anchorDay,
-                    initialStart: TimeUtil.anchoredTime(.now, to: anchorDay),
+                    initialStart: TimeUtil.anchoredTime(initial, to: anchorDay),
                     initialLengthMinutes: 60
                 ) { plan, start, length in
                     let anchoredStart = TimeUtil.anchoredTime(
@@ -75,19 +104,16 @@ struct DayTemplateEditorView: View {
                             start: anchoredStart, requestedMinutes: length)
                         drafts.append(
                             PlanEntryDraft(
-                                existingPlan: plan,
-                                start: anchoredStart,
-                                lengthMinutes: clamped
-                            )
-                        )
+                                existingPlan: plan, start: anchoredStart,
+                                lengthMinutes: clamped))
+                        refreshID = UUID()  // 🔄 force list refresh in create mode
+
                     case .edit(let template):
                         let minutes = clampMinutes(
                             start: anchoredStart, requestedMinutes: length)
                         let scheduled = ScheduledPlan(
-                            plan: plan,
-                            startTime: anchoredStart,
-                            duration: TimeInterval(minutes * 60)
-                        )
+                            plan: plan, startTime: anchoredStart,
+                            duration: TimeInterval(minutes * 60))
                         scheduled.dayTemplate = template
                         modelContext.insert(scheduled)
                         try? modelContext.save()
