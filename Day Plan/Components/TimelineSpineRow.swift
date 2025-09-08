@@ -391,7 +391,7 @@ struct TimelineSpineRow: View {
                                 )
                                 .stroke(
                                     Color(uiColor: .systemBackground).opacity(
-                                        0.9), lineWidth: 1)
+                                        0.9), lineWidth: 0)
                             )
                             .overlay {
                                 let side = dotDiameter - 2 * dotContentInset

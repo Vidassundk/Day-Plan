@@ -24,7 +24,7 @@ struct DayTemplateManagerView: View {
             } else {
                 ForEach(dayTemplates) { template in
                     NavigationLink {
-                        DayTemplateDetailView(template: template)
+                        DayTemplateEditorView(.edit(template))
                     } label: {
                         Text(template.name)
                     }
@@ -46,7 +46,7 @@ struct DayTemplateManagerView: View {
         }
         // Keeping Add as a sheet is often nicer for quick entry; can be pushed if you prefer.
         .sheet(isPresented: $isAddingTemplate) {
-            AddDayTemplateView(showWeekScheduleFromHere: .constant(false))
+            DayTemplateEditorView(.create())
         }
     }
 

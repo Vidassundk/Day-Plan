@@ -126,13 +126,14 @@ struct WeekdayAssignmentRow: View {
         .contentShape(Rectangle())
         .sheet(isPresented: $showCreateSheet) {
             // Prefill name with weekday, auto-assign on save
-            AddDayTemplateView(
-                prefillName: "\(assignment.weekday.name) Plan",
-                onSaved: { newTemplate in
-                    assignment.template = newTemplate
-                    try? modelContext.save()
-                }
-            )
+            DayTemplateEditorView(
+                .create(
+                    prefillName: "\(assignment.weekday.name) Plan",
+                    onSaved: { newTemplate in
+                        assignment.template = newTemplate
+                        try? modelContext.save()
+                    }
+                ))
         }
     }
 }
