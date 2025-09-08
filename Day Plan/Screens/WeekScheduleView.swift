@@ -29,7 +29,9 @@ struct WeekScheduleView: View {
                     ForEach(Weekday.ordered, id: \.rawValue) { day in
                         let assn = assignment(for: day)  // ✅ create-on-demand
                         WeekdayAssignmentRow(
-                            assignment: assn, templates: templates)
+                            assignment: assn,
+                            templates: templates
+                        )
                     }
                 } header: {
                     Text("Assign a template to each weekday")
@@ -78,6 +80,12 @@ struct WeekdayAssignmentRow: View {
     @Bindable var assignment: WeekdayAssignment
     let templates: [DayTemplate]
 
+    // Special tag to trigger creation
+    private static let createNewSentinel =
+        UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    @State private var showCreateSheet = false
+
     var body: some View {
         HStack {
             Text(assignment.weekday.name)
@@ -88,12 +96,26 @@ struct WeekdayAssignmentRow: View {
                 selection: Binding<UUID?>(
                     get: { assignment.template?.id },  // reflects nil when template is deleted
                     set: { newId in
+                        // Intercept the "Create New..." pick
+                        if newId == Self.createNewSentinel {
+                            // Do not change the assignment yet; just show sheet
+                            showCreateSheet = true
+                            return
+                        }
                         assignment.template = templates.first { $0.id == newId }
                         try? modelContext.save()
                     }
                 )
             ) {
+                // Keep "None"
                 Text("None").tag(Optional<UUID>.none)
+
+                // First action: Create New…
+                Text("Create New…")
+                    .fontWeight(.semibold)
+                    .tag(Optional(Self.createNewSentinel))
+
+                // Existing templates
                 ForEach(templates) { tpl in
                     Text(tpl.name).tag(Optional(tpl.id))
                 }
@@ -102,5 +124,15 @@ struct WeekdayAssignmentRow: View {
             .labelsHidden()
         }
         .contentShape(Rectangle())
+        .sheet(isPresented: $showCreateSheet) {
+            // Prefill name with weekday, auto-assign on save
+            AddDayTemplateView(
+                prefillName: "\(assignment.weekday.name) Plan",
+                onSaved: { newTemplate in
+                    assignment.template = newTemplate
+                    try? modelContext.save()
+                }
+            )
+        }
     }
 }

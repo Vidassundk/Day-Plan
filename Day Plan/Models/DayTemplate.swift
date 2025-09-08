@@ -34,7 +34,10 @@ final class DayTemplate {
 extension DayTemplate {
     /// The effective day start = the earliest plan's start if any, else the internal anchor.
     var dayStart: Date {
-        (scheduledPlans.min(by: { $0.startTime < $1.startTime })?.startTime)
-            ?? startTime
+        if let earliest = scheduledPlans.min(by: { $0.startTime < $1.startTime }
+        )?.startTime {
+            return earliest
+        }
+        return Calendar.current.startOfDay(for: .now)
     }
 }

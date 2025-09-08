@@ -2,52 +2,77 @@ import SwiftData
 import SwiftUI
 
 /// Add a new Day Template with free-form plan times.
-/// - No "available time" calculations
-/// - No reflowing when start changes
-/// - The only constraint: for each draft, `start + length` must be <= dayStart + 24h.
+/// The 24h window anchor is the earliest draft plan start (or today 00:00 if empty).
 struct AddDayTemplateView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
     @Binding var showWeekScheduleFromHere: Bool
-    init(showWeekScheduleFromHere: Binding<Bool> = .constant(false)) {
+
+    // Optional callback for the created template (used by WeekScheduleView fast-track)
+    private let onSaved: ((DayTemplate) -> Void)?
+
+    // Init — no start time prefill anymore
+    init(
+        showWeekScheduleFromHere: Binding<Bool> = .constant(false),
+        prefillName: String? = nil,
+        onSaved: ((DayTemplate) -> Void)? = nil
+    ) {
         _showWeekScheduleFromHere = showWeekScheduleFromHere
+        _name = State(initialValue: prefillName ?? "")
+        self.onSaved = onSaved
     }
 
     @State private var name: String = ""
-    /// "Whole schedule start" anchor; the 24h window is [startTime, startTime + 24h)
-    @State private var startTime: Date = Calendar.current.startOfDay(for: .now)
 
+    // Drafts the user is assembling before saving
     @State private var drafts: [PlanEntryDraft] = []
+
+    // Effective anchor for the 24h window while drafting
+    private var draftDayAnchor: Date {
+        let fallback = Calendar.current.startOfDay(for: .now)
+        let earliest =
+            drafts
+            .map { TimeUtil.anchoredTime($0.start, to: fallback) }
+            .min()
+        return earliest ?? fallback
+    }
+
+    /// Clamp so that [start, start + minutes] lies within [anchor, anchor + 24h).
+    private func clampWithinDay(
+        start: Date, requestedMinutes: Int, anchor: Date
+    ) -> Int {
+        let endOfDay = anchor.addingTimeInterval(24 * 60 * 60)
+        let maxSeconds = max(0, endOfDay.timeIntervalSince(start))
+        return max(0, min(requestedMinutes, Int(maxSeconds / 60)))
+    }
 
     @Query(sort: \Plan.title) private var allPlans: [Plan]
 
     // Add plan sheet state
     @State private var showAddSheet = false
-    @State private var addMode: AddPlanMode = .reuse
-    @State private var newPlanTitle: String = ""
-    @State private var newPlanEmoji: String = "🧩"
-    @State private var selectedPlanId: UUID?
-    @State private var sheetStart: Date = Calendar.current.startOfDay(for: .now)
-    @State private var sheetLength: Int = 60
 
     var body: some View {
-        let day = DayWindow(start: startTime)
-
         NavigationStack {
             Form {
-                // Template section unchanged...
+                // MARK: Template
+                Section("Template") {
+                    TextField("Name", text: $name)
+                }
 
                 // MARK: Plans
                 Section("Plans") {
                     if drafts.isEmpty {
                         ContentUnavailableView(
-                            "No plans yet", systemImage: "list.bullet.rectangle"
+                            "No plans yet",
+                            systemImage: "list.bullet.rectangle",
+                            description: Text(
+                                "Add a plan to start building this day.")
                         )
                         .frame(maxWidth: .infinity)
                     } else {
                         ForEach(sortedDrafts()) { draft in
-                            draftRow(draft: draft, day: day)
+                            draftRow(draft: draft)  // uses draftDayAnchor internally
                         }
                         .onDelete(perform: deleteDrafts)
                     }
@@ -70,33 +95,35 @@ struct AddDayTemplateView: View {
                 }
             }
             .sheet(isPresented: $showAddSheet) {
-                // ✅ Use the unified sheet everywhere
                 AddOrReusePlanSheet(
-                    anchorDay: day.start,
-                    initialStart: TimeUtil.anchoredTime(.now, to: day.start),  // like before
+                    anchorDay: draftDayAnchor,
+                    initialStart: TimeUtil.anchoredTime(
+                        .now, to: draftDayAnchor),
                     initialLengthMinutes: 60
                 ) { plan, start, length in
-                    // Clamp to 24h window and append as a draft
-                    let clamped = DayScheduleEngine.clampDurationWithinDay(
-                        start: start,
+                    let anchoredStart = TimeUtil.anchoredTime(
+                        start, to: draftDayAnchor)
+                    let clamped = clampWithinDay(
+                        start: anchoredStart,
                         requestedMinutes: length,
-                        day: day
+                        anchor: draftDayAnchor
                     )
                     drafts.append(
                         PlanEntryDraft(
                             existingPlan: plan,
-                            start: start,
+                            start: anchoredStart,
                             lengthMinutes: clamped
                         )
                     )
                 }
             }
+
         }
     }
 
     // MARK: - Rows
 
-    private func draftRow(draft: PlanEntryDraft, day: DayWindow) -> some View {
+    private func draftRow(draft: PlanEntryDraft) -> some View {
         let idx = drafts.firstIndex(where: { $0.id == draft.id })!
         let livePlan = modelContext.plan(with: draft.planID)
 
@@ -105,22 +132,24 @@ struct AddDayTemplateView: View {
 
         return HStack(spacing: 12) {
             Text(emoji.isEmpty ? "🧩" : emoji).font(.title3)
-            VStack(alignment: .leading, spacing: 4) {
+
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(title.isEmpty ? "Untitled" : title)
                     if livePlan == nil {
-                        Text("Deleted").font(.caption).foregroundStyle(
-                            .secondary)
+                        Text("Deleted")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
                 // Timing display (anchored + clamped preview)
                 let anchoredStart = TimeUtil.anchoredTime(
-                    draft.start, to: day.start)
-                let clampedLen = DayScheduleEngine.clampDurationWithinDay(
+                    draft.start, to: draftDayAnchor)
+                let clampedLen = clampWithinDay(
                     start: anchoredStart,
                     requestedMinutes: drafts[idx].lengthMinutes,
-                    day: day
+                    anchor: draftDayAnchor
                 )
                 let end = anchoredStart.addingTimeInterval(
                     TimeInterval(clampedLen * 60))
@@ -138,14 +167,13 @@ struct AddDayTemplateView: View {
                         get: { drafts[idx].start },
                         set: { newValue in
                             let anchored = TimeUtil.anchoredTime(
-                                newValue, to: day.start)
+                                newValue, to: draftDayAnchor)
                             drafts[idx].start = anchored
-                            drafts[idx].lengthMinutes =
-                                DayScheduleEngine.clampDurationWithinDay(
-                                    start: anchored,
-                                    requestedMinutes: drafts[idx].lengthMinutes,
-                                    day: day
-                                )
+                            drafts[idx].lengthMinutes = clampWithinDay(
+                                start: anchored,
+                                requestedMinutes: drafts[idx].lengthMinutes,
+                                anchor: draftDayAnchor
+                            )
                         }
                     ),
                     displayedComponents: .hourAndMinute
@@ -157,13 +185,13 @@ struct AddDayTemplateView: View {
                     minutes: Binding(
                         get: { drafts[idx].lengthMinutes },
                         set: { newLen in
-                            drafts[idx].lengthMinutes =
-                                DayScheduleEngine.clampDurationWithinDay(
-                                    start: TimeUtil.anchoredTime(
-                                        drafts[idx].start, to: day.start),
-                                    requestedMinutes: newLen,
-                                    day: day
-                                )
+                            let anchored = TimeUtil.anchoredTime(
+                                drafts[idx].start, to: draftDayAnchor)
+                            drafts[idx].lengthMinutes = clampWithinDay(
+                                start: anchored,
+                                requestedMinutes: newLen,
+                                anchor: draftDayAnchor
+                            )
                         }
                     ),
                     initialMinutes: max(5, drafts[idx].lengthMinutes)
@@ -182,144 +210,25 @@ struct AddDayTemplateView: View {
         }
     }
 
-    // MARK: - Add Plan Sheet
-
-    private func addPlanSheet(day: DayWindow) -> some View {
-        NavigationStack {
-            Form {
-                Picker("Mode", selection: $addMode) {
-                    Text("Reuse plan").tag(AddPlanMode.reuse)
-                    Text("Create new plan").tag(AddPlanMode.new)
-                }
-                .pickerStyle(.segmented)
-
-                if addMode == .reuse {
-                    Section("Pick a plan") {
-                        Picker("Reusable plan", selection: $selectedPlanId) {
-                            ForEach(allPlans) { p in
-                                Text("\(p.emoji) \(p.title)").tag(
-                                    Optional(p.id))
-                            }
-                        }
-                        .pickerStyle(.navigationLink)
-                    }
-                } else {
-                    Section("New plan") {
-                        TextField("Title", text: $newPlanTitle)
-                        TextField("Emoji", text: $newPlanEmoji)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                }
-
-                Section("Timing") {
-                    DatePicker(
-                        "Start",
-                        selection: $sheetStart,
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.compact)
-                    .onChange(of: sheetStart) { newValue in
-                        sheetStart = TimeUtil.anchoredTime(
-                            newValue, to: day.start)
-                        sheetLength = DayScheduleEngine.clampDurationWithinDay(
-                            start: sheetStart,
-                            requestedMinutes: sheetLength,
-                            day: day
-                        )
-                    }
-
-                    LengthPicker(
-                        "Length",
-                        minutes: $sheetLength,
-                        initialMinutes: max(5, sheetLength)
-                    )
-                    .onChange(of: sheetLength) { newLen in
-                        sheetLength = DayScheduleEngine.clampDurationWithinDay(
-                            start: TimeUtil.anchoredTime(
-                                sheetStart, to: day.start),
-                            requestedMinutes: newLen,
-                            day: day
-                        )
-                    }
-                }
-            }
-            .navigationTitle("Add Plan")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showAddSheet = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        let anchoredStart = TimeUtil.anchoredTime(
-                            sheetStart, to: day.start)
-                        let clamped = DayScheduleEngine.clampDurationWithinDay(
-                            start: anchoredStart,
-                            requestedMinutes: sheetLength,
-                            day: day
-                        )
-
-                        switch addMode {
-                        case .reuse:
-                            guard let id = selectedPlanId,
-                                let plan = allPlans.first(where: { $0.id == id }
-                                )
-                            else { return }
-                            drafts.append(
-                                PlanEntryDraft(
-                                    existingPlan: plan, start: anchoredStart,
-                                    lengthMinutes: clamped
-                                ))
-
-                        case .new:
-                            let title = newPlanTitle.trimmingCharacters(
-                                in: .whitespacesAndNewlines)
-                            let plan = Plan(
-                                title: title.isEmpty ? "Untitled" : title,
-                                planDescription: nil,
-                                emoji: newPlanEmoji.isEmpty ? "🧩" : newPlanEmoji
-                            )
-                            modelContext.insert(plan)
-                            try? modelContext.save()
-                            drafts.append(
-                                PlanEntryDraft(
-                                    existingPlan: plan, start: anchoredStart,
-                                    lengthMinutes: clamped
-                                ))
-                        }
-
-                        showAddSheet = false
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Save
 
     private func saveTemplate() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let template = DayTemplate(
-            name: trimmed.isEmpty ? "New Day" : trimmed,
-            startTime: startTime
-        )
+        let template = DayTemplate(name: trimmed.isEmpty ? "New Day" : trimmed)
         modelContext.insert(template)
 
-        let day = DayWindow(start: template.startTime)
+        // Persist using the earliest draft as anchor
+        let saveAnchor = draftDayAnchor
 
         for draft in drafts {
-            // If the plan was deleted, skip this draft
             guard let plan = modelContext.plan(with: draft.planID) else {
                 continue
             }
 
-            let start = TimeUtil.anchoredTime(
-                draft.start, to: template.startTime)
-            let minutes = DayScheduleEngine.clampDurationWithinDay(
-                start: start,
-                requestedMinutes: draft.lengthMinutes,
-                day: day
-            )
+            let start = TimeUtil.anchoredTime(draft.start, to: saveAnchor)
+            let minutes = clampWithinDay(
+                start: start, requestedMinutes: draft.lengthMinutes,
+                anchor: saveAnchor)
 
             let scheduled = ScheduledPlan(
                 plan: plan,
@@ -331,6 +240,7 @@ struct AddDayTemplateView: View {
         }
 
         try? modelContext.save()
+        onSaved?(template)  // if used by WeekScheduleView
         dismiss()
     }
 
@@ -338,8 +248,8 @@ struct AddDayTemplateView: View {
 
     private func sortedDrafts() -> [PlanEntryDraft] {
         drafts.sorted { a, b in
-            TimeUtil.anchoredTime(a.start, to: startTime)
-                < TimeUtil.anchoredTime(b.start, to: startTime)
+            TimeUtil.anchoredTime(a.start, to: draftDayAnchor)
+                < TimeUtil.anchoredTime(b.start, to: draftDayAnchor)
         }
     }
 
@@ -353,7 +263,3 @@ struct AddDayTemplateView: View {
         }
     }
 }
-
-// MARK: - Types
-
-private enum AddPlanMode { case new, reuse }

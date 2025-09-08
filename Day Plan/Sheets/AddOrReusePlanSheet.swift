@@ -2,11 +2,22 @@
 //  AddOrReusePlanSheet.swift
 //  Day Plan
 //
-//  Created by Vidas Sun on 27/08/2025.
+//  Restores per-plan Start time input (anchored to caller's day).
 //
 
 import SwiftData
 import SwiftUI
+
+// Small helper so the chosen time-of-day is placed on the anchor day.
+private func anchoredTime(_ time: Date, to anchor: Date) -> Date {
+    let cal = Calendar.current
+    let t = cal.dateComponents([.hour, .minute, .second], from: time)
+    return cal.date(
+        bySettingHour: t.hour ?? 0,
+        minute: t.minute ?? 0,
+        second: t.second ?? 0,
+        of: anchor) ?? anchor
+}
 
 extension Color {
     static var placeholderText: Color { Color(uiColor: .placeholderText) }
@@ -18,8 +29,10 @@ struct AddOrReusePlanSheet: View {
         case reuse = "Reuse Existing"
     }
 
-    // ⬇️ Simplified inputs
+    // NEW: the day to anchor the time-of-day to
     let anchorDay: Date
+
+    // Callback now returns plan + start + length (per-plan start time)
     let onAdd: (_ plan: Plan, _ start: Date, _ lengthMinutes: Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -33,10 +46,10 @@ struct AddOrReusePlanSheet: View {
         )
     }
 
-    // 1) state to show a popover picker
-    @State private var showEmojiPicker = false
-
+    // UI mode
     @State private var mode: Mode = .create
+
+    // Schedule inputs (both are user-editable)
     @State private var start: Date
     @State private var lengthMinutes: Int
 
@@ -44,10 +57,9 @@ struct AddOrReusePlanSheet: View {
     @State private var title = ""
     @State private var emoji = ""
     @State private var description = ""
-
-    // NEW: color picking state
-    @State private var useCustomColor = false
     @State private var chosenColor: Color = .accentColor
+
+    @State private var showEmojiPicker = false
 
     // Reuse-existing
     @Query(sort: \Plan.title) private var allPlans: [Plan]
@@ -62,7 +74,8 @@ struct AddOrReusePlanSheet: View {
     ) {
         self.anchorDay = anchorDay
         self.onAdd = onAdd
-        _start = State(initialValue: initialStart ?? anchorDay)
+        _start = State(
+            initialValue: anchoredTime(initialStart ?? .now, to: anchorDay))
         _lengthMinutes = State(initialValue: max(5, initialLengthMinutes))
     }
 
@@ -71,7 +84,7 @@ struct AddOrReusePlanSheet: View {
             Form {
                 modePickerSection
                 planSection
-                scheduleSection
+                scheduleSection  // Start time + Length here
             }
             .navigationTitle("Add Plan")
             .toolbar { toolbarContent }
@@ -132,7 +145,8 @@ struct AddOrReusePlanSheet: View {
             }
             .buttonStyle(.plain)
             .popover(
-                isPresented: $showEmojiPicker, attachmentAnchor: .rect(.bounds),
+                isPresented: $showEmojiPicker,
+                attachmentAnchor: .rect(.bounds),
                 arrowEdge: .trailing
             ) {
                 EmojiKitPickerView(selection: $emoji)
@@ -140,11 +154,10 @@ struct AddOrReusePlanSheet: View {
             }
 
             TextField("Description (optional)", text: $description)
-
-            // NEW: always show — no opacity control
             ColorPicker(
                 "Color", selection: $chosenColor, supportsOpacity: false)
         }
+
     }
 
     @ViewBuilder
@@ -154,26 +167,25 @@ struct AddOrReusePlanSheet: View {
                 ContentUnavailableView(
                     "No saved plans yet", systemImage: "shippingbox")
             } else {
-                ForEach(allPlans) { p in
+                ForEach(allPlans, id: \.id) { plan in
                     Button {
-                        selectedPlanId = p.id
+                        selectedPlanId = plan.id
                     } label: {
                         HStack(spacing: 8) {
-                            Circle()
-                                .fill(p.tintColor)  // uses the helper from Plan.swift
-                                .frame(width: 10, height: 10)
-                            Text("\(p.emoji) \(p.title)")
+                            Circle().fill(plan.tintColor).frame(
+                                width: 10, height: 10)
+                            Text("\(plan.emoji) \(plan.title)")
                             Spacer()
-                            if selectedPlanId == p.id {
+                            if selectedPlanId == plan.id {
                                 Image(systemName: "checkmark").foregroundStyle(
-                                    Color.accentColor)
+                                    .primary)
                             }
                         }
                     }
                     .buttonStyle(.plain)
                     .swipeActions {
                         Button(role: .destructive) {
-                            planPendingDeletion = p
+                            planPendingDeletion = plan
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -190,16 +202,13 @@ struct AddOrReusePlanSheet: View {
                 "Start", selection: $start, displayedComponents: .hourAndMinute
             )
             .datePickerStyle(.compact)
-
-            // Use the current state's length to seed the control nicely
             LengthPicker(
                 "Length", minutes: $lengthMinutes,
                 initialMinutes: max(5, lengthMinutes))
-
-            LabeledContent("Will run") {
-                Text(willRunText)
-                    .foregroundStyle(.secondary)
-            }
+        }
+        .onChange(of: start) { newValue in
+            // keep time-of-day but re-anchor to the provided day (defensive)
+            start = anchoredTime(newValue, to: anchorDay)
         }
     }
 
@@ -211,19 +220,15 @@ struct AddOrReusePlanSheet: View {
             Button("Cancel") { dismiss() }
         }
         ToolbarItem(placement: .confirmationAction) {
-            Button("Add") { performAdd() }
-                .disabled(!canAdd)
+            Button("Add") { performAdd() }.disabled(!canAdd)
         }
     }
 
     private func performAdd() {
-        let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
-
-        // Helper: treat accent as “no custom color” -> store empty string
+        // Treat accent as "no custom color" -> store empty string
         func storedHex(for color: Color) -> String {
             let picked = color.toHexRGB()?.uppercased()
             let accent = Color.accentColor.toHexRGB()?.uppercased()
-            // If we can compare and they match, return "", else the picked hex (or "")
             if let p = picked, let a = accent, p == a { return "" }
             return picked ?? ""
         }
@@ -239,7 +244,7 @@ struct AddOrReusePlanSheet: View {
                     return trimmed.isEmpty ? nil : trimmed
                 }(),
                 emoji: emoji,
-                colorHex: storedHex(for: chosenColor)  // ⬅️ key line
+                colorHex: storedHex(for: chosenColor)
             )
             modelContext.insert(p)
             try? modelContext.save()
@@ -252,7 +257,7 @@ struct AddOrReusePlanSheet: View {
             plan = found
         }
 
-        onAdd(plan, anchoredStart, lengthMinutes)
+        onAdd(plan, anchoredTime(start, to: anchorDay), lengthMinutes)
         dismiss()
     }
 
@@ -266,15 +271,6 @@ struct AddOrReusePlanSheet: View {
 
     // MARK: - Derived
 
-    private var willRunText: String {
-        let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
-        let end = anchoredStart.addingTimeInterval(
-            TimeInterval(lengthMinutes * 60))
-        let startStr = anchoredStart.formatted(date: .omitted, time: .shortened)
-        let endStr = end.formatted(date: .omitted, time: .shortened)
-        return
-            "\(startStr) – \(endStr) (\(TimeUtil.formatMinutes(lengthMinutes)))"
-    }
     private var canAdd: Bool {
         switch mode {
         case .create:
@@ -286,5 +282,4 @@ struct AddOrReusePlanSheet: View {
             return selectedPlanId != nil
         }
     }
-
 }
