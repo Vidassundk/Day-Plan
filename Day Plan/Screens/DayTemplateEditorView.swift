@@ -1,8 +1,12 @@
 import SwiftData
 import SwiftUI
 
-/// Screen: create or edit a `DayTemplate`.
-/// MVVM: `DayTemplateEditorViewModel` owns state, clamping, and persistence.
+/// Screen: create or edit a DayTemplate.
+///
+/// The ViewModel owns:
+/// - create vs edit flow
+/// - clamping logic (24h window that starts at the day's first plan)
+/// - persistence
 struct DayTemplateEditorView: View {
     enum Mode {
         case create(
@@ -26,7 +30,9 @@ struct DayTemplateEditorView: View {
 
     var body: some View {
         content
+            // Give VM its context once we’re mounted.
             .onAppear { vm.attach(context: modelContext) }
+            // Reuse the same add sheet used elsewhere in the app.
             .sheet(isPresented: $showAddSheet) {
                 let initial = vm.suggestedInitialStart()
                 AddOrReusePlanSheet(
@@ -59,6 +65,7 @@ struct DayTemplateEditorView: View {
                     Section("Template") {
                         TextField("Name", text: $vm.name)
                     }
+
                     Section("Plans") {
                         if vm.drafts.isEmpty {
                             ContentUnavailableView(
@@ -143,26 +150,33 @@ struct DayTemplateEditorView: View {
                 template.name.isEmpty ? "Day Template" : template.name
             )
             .navigationBarTitleDisplayMode(.inline)
+            // Keep list in sync after inserts/deletes so ordering & rows stay fresh.
             .id(vm.refreshID)
         }
     }
 
     // MARK: - Rows
 
+    /// Draft row (create mode).
     private func draftRow(_ draft: PlanEntryDraft) -> some View {
-        // Resolve live plan (may be deleted — then we'll show snapshot + badge).
-        let idx = vm.drafts.firstIndex(where: { $0.id == draft.id })!
-        let livePlan = vm.livePlan(for: vm.drafts[idx].planID)
+        // Keep a stable index back into `vm.drafts`.
+        guard let idx = vm.drafts.firstIndex(where: { $0.id == draft.id })
+        else {
+            return EmptyView().eraseToAnyView()
+        }
 
+        // Show live Plan if it still exists, otherwise the stored snapshot.
+        let livePlan = vm.livePlan(for: vm.drafts[idx].planID)
         let title = (livePlan?.title ?? vm.drafts[idx].titleSnapshot)
         let emoji = (livePlan?.emoji ?? vm.drafts[idx].emojiSnapshot)
 
+        // Use anchored start for all time math within this day-window.
         let anchoredStart = TimeUtil.anchoredTime(
             vm.drafts[idx].start, to: vm.anchorDay)
-        let clampedLen = vm.clampMinutes(
-            start: anchoredStart, requestedMinutes: vm.drafts[idx].lengthMinutes
-        )
-        let end = anchoredStart.adding(minutes: clampedLen)
+        let maxAllowed = vm.maxSelectableMinutes(from: anchoredStart)
+
+        let end = anchoredStart.addingTimeInterval(
+            TimeInterval(vm.drafts[idx].lengthMinutes * 60))
 
         return HStack(spacing: 12) {
             Text(emoji.isEmpty ? "🧩" : emoji).font(.title3)
@@ -177,11 +191,12 @@ struct DayTemplateEditorView: View {
                 }
 
                 Text(
-                    "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) · \(TimeUtil.formatMinutes(clampedLen))"
+                    "\(anchoredStart.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened)) · \(TimeUtil.formatMinutes(vm.drafts[idx].lengthMinutes))"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                // Start time: re-anchor + re-clamp when changed.
                 DatePicker(
                     "Start",
                     selection: Binding(
@@ -190,41 +205,45 @@ struct DayTemplateEditorView: View {
                             let anchored = TimeUtil.anchoredTime(
                                 newValue, to: vm.anchorDay)
                             vm.drafts[idx].start = anchored
-                            vm.drafts[idx].lengthMinutes = vm.clampMinutes(
-                                start: anchored,
-                                requestedMinutes: vm.drafts[idx].lengthMinutes)
+
+                            // If start shifts, recompute the dynamic ceiling and re-clamp the current length.
+                            let newMax = vm.maxSelectableMinutes(from: anchored)
+                            vm.drafts[idx].lengthMinutes = min(
+                                vm.clampMinutes(
+                                    start: anchored,
+                                    requestedMinutes: vm.drafts[idx]
+                                        .lengthMinutes),
+                                newMax
+                            )
                         }
                     ),
                     displayedComponents: .hourAndMinute
                 )
                 .datePickerStyle(.compact)
 
+                // Length: shared LengthPicker with a dynamic ceiling.
+                // IMPORTANT: no .id tied to minutes — otherwise the compact popover closes on every tick.
                 LengthPicker(
                     "Length",
                     minutes: Binding(
                         get: { vm.drafts[idx].lengthMinutes },
                         set: { newLen in
-                            let anchored = TimeUtil.anchoredTime(
-                                vm.drafts[idx].start, to: vm.anchorDay)
+                            // VM still clamps (source of truth).
                             vm.drafts[idx].lengthMinutes = vm.clampMinutes(
-                                start: anchored, requestedMinutes: newLen)
+                                start: anchoredStart,
+                                requestedMinutes: newLen
+                            )
                         }
                     ),
-                    initialMinutes: max(5, vm.drafts[idx].lengthMinutes)
+                    initialMinutes: vm.drafts[idx].lengthMinutes,
+                    maxMinutes: maxAllowed
                 )
             }
         }
-        .swipeActions {
-            if vm.livePlan(for: vm.drafts[idx].planID) == nil {
-                Button(role: .destructive) {
-                    vm.drafts.removeAll { $0.id == draft.id }
-                } label: {
-                    Label("Remove", systemImage: "trash")
-                }
-            }
-        }
+        .eraseToAnyView()
     }
 
+    /// Scheduled row (edit mode).
     private func scheduledRow(_ sp: ScheduledPlan) -> some View {
         let startBinding = Binding<Date>(
             get: { sp.startTime },
@@ -239,6 +258,7 @@ struct DayTemplateEditorView: View {
         let start = sp.startTime
         let end = sp.endTime
         let mins = Int(sp.duration / 60)
+        let maxAllowed = vm.maxSelectableMinutes(from: start)
 
         return HStack(alignment: .top, spacing: 12) {
             let emoji = sp.plan?.emoji ?? ""
@@ -265,10 +285,20 @@ struct DayTemplateEditorView: View {
                 )
                 .datePickerStyle(.compact)
 
+                // Same fix here: do not put .id on minutes.
                 LengthPicker(
-                    "Length", minutes: minutesBinding,
-                    initialMinutes: max(5, minutesBinding.wrappedValue))
+                    "Length",
+                    minutes: minutesBinding,
+                    initialMinutes: mins,
+                    maxMinutes: maxAllowed
+                )
             }
         }
+        .eraseToAnyView()
     }
+}
+
+// Small helper so we can `return EmptyView()` inside a conditional and still satisfy View builder.
+extension View {
+    fileprivate func eraseToAnyView() -> AnyView { AnyView(self) }
 }

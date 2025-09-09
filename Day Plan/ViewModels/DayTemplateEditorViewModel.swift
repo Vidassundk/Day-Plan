@@ -26,6 +26,8 @@ final class DayTemplateEditorViewModel: ObservableObject {
 
     // MARK: - Init / Attach
 
+    /// ViewModel initializer that accepts the view's public Mode and maps it
+    /// into a VM-internal, persistence-friendly Mode (IDs instead of objects).
     init(mode: DayTemplateEditorView.Mode) {
         switch mode {
         case .create(let prefill, let onSaved):
@@ -45,7 +47,7 @@ final class DayTemplateEditorViewModel: ObservableObject {
 
     /// Anchor day:
     /// - Create: earliest draft (anchored), or today 00:00.
-    /// - Edit: earliest plan or the template's own `startTime`.
+    /// - Edit: earliest plan or the template's own `dayStart`.
     var anchorDay: Date {
         switch mode {
         case .create:
@@ -203,8 +205,17 @@ final class DayTemplateEditorViewModel: ObservableObject {
     /// Clamp a requested duration (minutes) so that `start + duration` stays within the same day.
     func clampMinutes(start: Date, requestedMinutes: Int) -> Int {
         DayScheduleEngine.clampDurationWithinDay(
-            start: start, requestedMinutes: requestedMinutes,
-            day: DayWindow(start: anchorDay))
+            start: start,
+            requestedMinutes: requestedMinutes,
+            day: DayWindow(start: anchorDay)
+        )
+    }
+
+    /// Maximum minutes allowed from a given `start` until the end of the 24h window.
+    /// The view uses this to **limit** pickers so overflow is impossible.
+    func maxSelectableMinutes(from start: Date) -> Int {
+        let end = anchorDay.addingTimeInterval(24 * 60 * 60)
+        return max(0, Int(end.timeIntervalSince(start) / 60))
     }
 
     /// Live fetch of a `Plan` if it still exists (useful for showing "Deleted" labels).
