@@ -2,30 +2,44 @@ import SwiftData
 import SwiftUI
 
 /// Renders today's timeline for a given template ID.
-/// MVVM: `TodayTimelineViewModel` provides template/plans + derived state.
+/// Uses live `@Query` for the template and its scheduled plans to avoid
+/// race conditions on first render (before a ModelContext is attached).
 struct TodayTimelineView: View {
-    @Environment(\.modelContext) private var modelContext
     let templateID: UUID
 
     @StateObject private var vm: TodayTimelineViewModel
-    @State private var gutterMode: GutterMode = .auto
-    private enum GutterMode: String, CaseIterable { case auto, show, hide }
 
+    // Live SwiftData queries. These are parameterized in init using the templateID.
+    @Query private var templateResults: [DayTemplate]
+    @Query private var scheduled: [ScheduledPlan]
+
+    // UI
+    private enum GutterMode: String, CaseIterable { case auto, show, hide }
+    @State private var gutterMode: GutterMode = .auto
     private let tick: TimeInterval = 1
 
     init(templateID: UUID) {
         self.templateID = templateID
         _vm = StateObject(
             wrappedValue: TodayTimelineViewModel(templateID: templateID))
+
+        // Fetch exactly this template (live-updating)
+        _templateResults = Query(filter: #Predicate { $0.id == templateID })
+
+        // Fetch this template's scheduled plans, sorted by start time (live-updating)
+        _scheduled = Query(
+            filter: #Predicate { $0.dayTemplate?.id == templateID },
+            sort: [SortDescriptor(\ScheduledPlan.startTime, order: .forward)]
+        )
     }
 
     var body: some View {
         Group {
-            if let template = vm.template() {
+            if let template = templateResults.first {
                 let bounds = vm.dayBounds(for: template)
 
                 TimelineView(.periodic(from: .now, by: tick)) { context in
-                    let plans = vm.plansSorted()  // small dataset; okay to refresh per tick
+                    let plans = scheduled
                     let now = vm.anchoredNow(
                         context.date, dayStart: bounds.start, dayEnd: bounds.end
                     )
@@ -41,8 +55,6 @@ struct TodayTimelineView: View {
                     } else {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 0) {
-
-                                // Before-first gap
                                 if let first = plans.first,
                                     now < first.startTime
                                 {
@@ -59,8 +71,6 @@ struct TodayTimelineView: View {
 
                                 ForEach(plans.indices, id: \.self) { i in
                                     let sp = plans[i]
-
-                                    // Neighbor colors for blend/junctions
                                     let topFrom: Color? =
                                         (i > 0)
                                         ? vm.outputColor(
@@ -81,7 +91,6 @@ struct TodayTimelineView: View {
                                         bottomToColor: bottomTo
                                     )
 
-                                    // Gap between this plan's end and next plan's start (when we're in-between)
                                     if i < plans.count - 1 {
                                         let next = plans[i + 1]
                                         if now >= sp.endTime
@@ -106,16 +115,14 @@ struct TodayTimelineView: View {
                     }
                 }
             } else {
-                ContentUnavailableView(
-                    "Template deleted",
-                    systemImage: "calendar.badge.exclamationmark")
+                // While the live query warms up at app launch, avoid a scary "deleted" message.
+                // Show a lightweight placeholder for a brief moment; if truly missing, it will persist.
+                ContentUnavailableView("Loading…", systemImage: "clock")
+                    .transition(.opacity)
             }
         }
-        .onAppear { vm.attach(context: modelContext) }
-        .id(templateID)
+        .id(templateID)  // keep scroll state per template
     }
-
-    // MARK: - Private
 
     @ViewBuilder
     private var emptyState: some View {
