@@ -2,6 +2,10 @@
 import EmojiKit
 import SwiftUI
 
+/// A lightweight wrapper around EmojiKit's grid that:
+/// - Supports search with iOS' `.searchable` UI
+/// - Returns a single emoji character via `@Binding selection`
+/// - Presents as a compact sheet with detents for quick picking
 @MainActor
 struct EmojiKitPickerView: View {
     @Environment(\.dismiss) private var dismiss
@@ -35,13 +39,11 @@ struct EmojiKitPickerView: View {
                     }
                 )
             }
-            // Pinned search
             .searchable(
                 text: $query,
                 placement: .navigationBarDrawer(displayMode: .always),
                 prompt: "Search emoji"
             )
-
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
