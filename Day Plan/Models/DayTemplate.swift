@@ -1,23 +1,25 @@
 import Foundation
 import SwiftData
 
-// MARK: - DayTemplate Model
-/// Represents a template for a day, containing a collection of scheduled activities.
-/// Each DayTemplate has a unique name and holds a list of `ScheduledPlan` objects,
-/// which define the specific timing of each activity within this template.
+/// A named day “blueprint” containing scheduled plan instances.
+/// Users can assign a template to weekdays or open/edit it directly.
 @Model
 final class DayTemplate {
     @Attribute(.unique) var id: UUID
 
-    @Relationship(deleteRule: .nullify, inverse: \WeekdayAssignment.template)
-    var weekdayAssignments: [WeekdayAssignment] = []
-
+    /// Friendly name shown in lists (e.g., "Workday", "Weekend").
     var name: String
 
+    /// Anchor start for the day (used when there are no scheduled plans).
     var startTime: Date = Calendar.current.startOfDay(for: .now)
 
+    /// All concrete occurrences for this template.
     @Relationship(deleteRule: .cascade, inverse: \ScheduledPlan.dayTemplate)
     var scheduledPlans: [ScheduledPlan] = []
+
+    /// Weekday assignments that reference this template (nullify on delete).
+    @Relationship(deleteRule: .nullify, inverse: \WeekdayAssignment.template)
+    var weekdayAssignments: [WeekdayAssignment] = []
 
     init(name: String, startTime: Date) {
         self.id = UUID()
@@ -25,19 +27,21 @@ final class DayTemplate {
         self.startTime = startTime
     }
 
-    // ✅ Makes existing call-sites like DayTemplate(name:) still compile
+    /// Convenience initializer using "today at 00:00" as anchor start.
     convenience init(name: String) {
         self.init(name: name, startTime: Calendar.current.startOfDay(for: .now))
     }
 }
 
 extension DayTemplate {
-    /// The effective day start = the earliest plan's start if any, else the internal anchor.
+    /// Effective start of the day:
+    /// - If there are scheduled plans, use the earliest plan's start.
+    /// - Otherwise, fall back to the template's `startTime` anchor.
     var dayStart: Date {
         if let earliest = scheduledPlans.min(by: { $0.startTime < $1.startTime }
         )?.startTime {
             return earliest
         }
-        return Calendar.current.startOfDay(for: .now)
+        return startTime
     }
 }

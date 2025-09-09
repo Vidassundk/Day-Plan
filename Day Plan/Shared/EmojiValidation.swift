@@ -1,21 +1,16 @@
-//
-//  EmojiValidation.swift
-//  Day Plan
-//
-//  Created by Vidas Sun on 03/09/2025.
-//
-
 import Foundation
 
+/// Emoji utilities for validating and extracting user input.
 extension Character {
-    /// True if any scalar in the grapheme is an Emoji scalar. Works for flags, skin tones, ZWJ sequences, etc.
+    /// True if any Unicode scalar in the grapheme is marked as Emoji.
+    /// Works for flags, skin tones, and ZWJ sequences.
     var isEmoji: Bool {
         unicodeScalars.contains { $0.properties.isEmoji }
     }
 }
 
 extension String {
-    /// Returns the last emoji grapheme in the string (if any), otherwise nil.
+    /// The last emoji grapheme in the string (if any).
     var lastEmoji: String? {
         for ch in self.reversed() where ch.isEmoji {
             return String(ch)
@@ -23,7 +18,7 @@ extension String {
         return nil
     }
 
-    /// Returns this string clamped to a single emoji (or empty if none).
+    /// Clamp a string to a single emoji (or empty if none present).
     var clampedToSingleEmoji: String {
         lastEmoji ?? ""
     }

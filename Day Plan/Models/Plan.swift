@@ -1,19 +1,26 @@
-// Plan.swift
 import Foundation
 import SwiftData
 import SwiftUI
-import UIKit
 
+/// Domain model describing a reusable activity (title/emoji/color).
+/// - Stored independently and scheduled via `ScheduledPlan`.
 @Model
 final class Plan {
     @Attribute(.unique) var id: UUID
+
+    /// Display title for UI and search.
     var title: String
+
+    /// Optional longer description (notes, details).
     var planDescription: String?
+
+    /// Primary emoji to represent the plan in the UI.
     var emoji: String
 
-    // NEW: non-optional. Empty string == “use .accentColor”
+    /// Hex color string (`#RRGGBB`). Empty = use `.accentColor`.
     var colorHex: String
 
+    /// Reverse link to all schedule usages. Cascade ensures cleanup.
     @Relationship(deleteRule: .cascade, inverse: \ScheduledPlan.plan)
     var scheduledUsages: [ScheduledPlan] = []
 
@@ -21,7 +28,7 @@ final class Plan {
         title: String,
         planDescription: String? = nil,
         emoji: String,
-        colorHex: String = ""  // default: accent fallback
+        colorHex: String = ""  // empty means "use accent color"
     ) {
         self.id = UUID()
         self.title = title
@@ -30,34 +37,10 @@ final class Plan {
         self.colorHex = colorHex
     }
 
-    // Always yields a visible color; empty => accent
+    /// A non-optional color the UI can always render.
+    /// Falls back to `.accentColor` when `colorHex` is empty or invalid.
     var tintColor: Color {
         if colorHex.isEmpty { return .accentColor }
         return Color(hex: colorHex) ?? .accentColor
-    }
-}
-
-// MARK: - Color helpers
-extension Color {
-    init?(hex: String) {
-        let s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "#", with: "")
-        guard s.count == 6, let v = Int(s, radix: 16) else { return nil }
-        let r = Double((v >> 16) & 0xFF) / 255.0
-        let g = Double((v >> 8) & 0xFF) / 255.0
-        let b = Double(v & 0xFF) / 255.0
-        self = Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
-    }
-
-    func toHexRGB() -> String? {
-        let ui = UIColor(self)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
-        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
-        return String(
-            format: "#%02X%02X%02X",
-            Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
     }
 }

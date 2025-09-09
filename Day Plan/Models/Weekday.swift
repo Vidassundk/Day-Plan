@@ -1,18 +1,13 @@
-//
-//  Weekday.swift
-//  Day Plan
-//
-//  Created by Vidas Sun on 27/08/2025.
-//
-
 import Foundation
 
+/// ISO-like weekday (Mon=1). Codable for persistence and settings.
 public enum Weekday: Int, CaseIterable, Identifiable, Codable {
     case monday = 1
     case tuesday, wednesday, thursday, friday, saturday, sunday
 
     public var id: Int { rawValue }
 
+    /// Localizable display name for UI.
     public var name: String {
         switch self {
         case .monday: "Monday"
@@ -25,5 +20,6 @@ public enum Weekday: Int, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// Monday-first ordering for list UIs and pickers.
     public static var ordered: [Weekday] { Self.allCases }
 }

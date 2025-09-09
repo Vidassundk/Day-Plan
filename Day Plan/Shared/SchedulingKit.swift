@@ -1,8 +1,9 @@
 import Foundation
 
-// MARK: - Time utilities
+/// Time helpers used across timeline, editors, and validation flows.
 public enum TimeUtil {
-    /// Return `time` with only its hour/minute/second applied onto the date of `anchor`.
+    /// Apply hour:minute:second of `time` onto the **date** of `anchor`.
+    /// Useful for keeping a chosen time while shifting it into a specific day.
     public static func anchoredTime(
         _ time: Date, to anchor: Date, calendar: Calendar = .current
     ) -> Date {
@@ -15,7 +16,7 @@ public enum TimeUtil {
             of: cal.startOfDay(for: anchor)) ?? anchor
     }
 
-    /// Human-readable minutes → "xh ym" / "xm".
+    /// Convert minute counts to a compact, readable string (e.g., "1h 30m", "45m").
     public static func formatMinutes(_ minutes: Int) -> String {
         let h = minutes / 60
         let m = minutes % 60
@@ -25,13 +26,17 @@ public enum TimeUtil {
     }
 }
 
+/// Represents a 24-hour window starting at `start`.
 public struct DayWindow {
     public let start: Date
     public var end: Date { start.addingTimeInterval(24 * 60 * 60) }
+
+    public init(start: Date) { self.start = start }
 }
 
+/// Operations that keep schedules within a single-day boundary.
 public enum DayScheduleEngine {
-    /// Clamp so that (start + length) <= day.start + 24h
+    /// Clamp a requested duration (in minutes) so that `start + duration` does not exceed `day.end`.
     public static func clampDurationWithinDay(
         start: Date,
         requestedMinutes: Int,
@@ -43,9 +48,8 @@ public enum DayScheduleEngine {
     }
 }
 
-// MARK: - Small convenience for models (non-invasive)
 extension Date {
-    /// Convenience to add minutes using Calendar.
+    /// Add minutes to a `Date` using `TimeInterval`.
     public func adding(minutes: Int) -> Date {
         self.addingTimeInterval(TimeInterval(minutes * 60))
     }
