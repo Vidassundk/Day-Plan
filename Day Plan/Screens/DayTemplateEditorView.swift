@@ -1,7 +1,8 @@
 import SwiftData
 import SwiftUI
 
-/// One screen for both creating a new DayTemplate and editing an existing one.
+/// Screen: create or edit a `DayTemplate`.
+/// MVVM: `DayTemplateEditorViewModel` owns state, clamping, and persistence.
 struct DayTemplateEditorView: View {
     enum Mode {
         case create(
@@ -13,117 +14,42 @@ struct DayTemplateEditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let mode: Mode
+    @StateObject private var vm: DayTemplateEditorViewModel
 
-    // Shared add-plan sheet state
+    // Add-plan sheet
     @State private var showAddSheet = false
-
-    @State private var refreshID = UUID()
-
-    // -------- CREATE MODE STATE --------
-    @State private var name: String = ""
-    @State private var drafts: [PlanEntryDraft] = []
-
-    // Compute anchor day:
-    // - Create: earliest draft start (or today 00:00 if empty)
-    // - Edit: template.dayStart (existing behavior)
-    private var anchorDay: Date {
-        switch mode {
-        case .create:
-            let fallback = Calendar.current.startOfDay(for: .now)
-            let earliest =
-                drafts
-                .map { TimeUtil.anchoredTime($0.start, to: fallback) }
-                .min()
-            return earliest ?? fallback
-        case .edit(let template):
-            return template.dayStart
-        }
-    }
-
-    // Helper clamp using shared SchedulingKit implementation
-    private func clampMinutes(start: Date, requestedMinutes: Int) -> Int {
-        let window = DayWindow(start: anchorDay)
-        return DayScheduleEngine.clampDurationWithinDay(
-            start: start,
-            requestedMinutes: requestedMinutes,
-            day: window
-        )
-    }
-
-    @Query(sort: \Plan.title) private var allPlans: [Plan]
 
     init(_ mode: Mode) {
         self.mode = mode
-        if case let .create(prefillName, _) = mode {
-            _name = State(initialValue: prefillName ?? "")
-        }
-    }
-
-    /// Suggest the next start time = end of the latest block in the current mode.
-    /// - Create: end of latest draft (clamped) or anchorDay if none
-    /// - Edit:   end of latest scheduled plan or anchorDay if none
-    private func suggestedInitialStart() -> Date {
-        let anchor = anchorDay
-        let endOfDay = anchor.addingTimeInterval(24 * 60 * 60)
-
-        let lastEnd: Date = {
-            switch mode {
-            case .create:
-                return drafts.map { d -> Date in
-                    let start = TimeUtil.anchoredTime(d.start, to: anchor)
-                    let clamped = clampMinutes(
-                        start: start, requestedMinutes: d.lengthMinutes)
-                    return start.addingTimeInterval(TimeInterval(clamped * 60))
-                }.max() ?? anchor
-
-            case .edit(let template):
-                return template.scheduledPlans
-                    .map { $0.startTime.addingTimeInterval($0.duration) }
-                    .max() ?? anchor
-            }
-        }()
-
-        // keep inside the same day; if it overflows, nudge to just before endOfDay
-        return min(lastEnd, endOfDay.addingTimeInterval(-60))
+        _vm = StateObject(wrappedValue: DayTemplateEditorViewModel(mode: mode))
     }
 
     var body: some View {
         content
+            .onAppear { vm.attach(context: modelContext) }
             .sheet(isPresented: $showAddSheet) {
-                let initial = suggestedInitialStart()
+                let initial = vm.suggestedInitialStart()
                 AddOrReusePlanSheet(
-                    anchorDay: anchorDay,
-                    initialStart: TimeUtil.anchoredTime(initial, to: anchorDay),
+                    anchorDay: vm.anchorDay,
+                    initialStart: TimeUtil.anchoredTime(
+                        initial, to: vm.anchorDay),
                     initialLengthMinutes: 60
                 ) { plan, start, length in
-                    let anchoredStart = TimeUtil.anchoredTime(
-                        start, to: anchorDay)
-                    switch mode {
+                    switch vm.mode {
                     case .create:
-                        let clamped = clampMinutes(
-                            start: anchoredStart, requestedMinutes: length)
-                        drafts.append(
-                            PlanEntryDraft(
-                                existingPlan: plan, start: anchoredStart,
-                                lengthMinutes: clamped))
-                        refreshID = UUID()  // 🔄 force list refresh in create mode
-
-                    case .edit(let template):
-                        let minutes = clampMinutes(
-                            start: anchoredStart, requestedMinutes: length)
-                        let scheduled = ScheduledPlan(
-                            plan: plan, startTime: anchoredStart,
-                            duration: TimeInterval(minutes * 60))
-                        scheduled.dayTemplate = template
-                        modelContext.insert(scheduled)
-                        try? modelContext.save()
-                        refreshID = UUID()
+                        vm.appendDraft(
+                            plan: plan, start: start, lengthMinutes: length)
+                    case .edit(let templateID):
+                        vm.addScheduled(
+                            to: templateID, plan: plan, start: start,
+                            lengthMinutes: length)
                     }
                 }
             }
     }
 
     // MARK: - Content per mode
+
     @ViewBuilder
     private var content: some View {
         switch mode {
@@ -131,10 +57,10 @@ struct DayTemplateEditorView: View {
             NavigationStack {
                 Form {
                     Section("Template") {
-                        TextField("Name", text: $name)
+                        TextField("Name", text: $vm.name)
                     }
                     Section("Plans") {
-                        if drafts.isEmpty {
+                        if vm.drafts.isEmpty {
                             ContentUnavailableView(
                                 "No plans yet",
                                 systemImage: "list.bullet.rectangle",
@@ -143,10 +69,10 @@ struct DayTemplateEditorView: View {
                             )
                             .frame(maxWidth: .infinity)
                         } else {
-                            ForEach(sortedDrafts()) { draft in
+                            ForEach(vm.sortedDrafts()) { draft in
                                 draftRow(draft)
                             }
-                            .onDelete(perform: deleteDrafts)
+                            .onDelete(perform: vm.deleteDrafts)
                         }
 
                         Button {
@@ -162,8 +88,11 @@ struct DayTemplateEditorView: View {
                         Button("Cancel") { dismiss() }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") { saveTemplate() }
-                            .disabled(drafts.isEmpty)
+                        Button("Save") {
+                            _ = vm.saveTemplateCreate()
+                            dismiss()
+                        }
+                        .disabled(vm.drafts.isEmpty)
                     }
                 }
             }
@@ -196,10 +125,10 @@ struct DayTemplateEditorView: View {
                                 $0.startTime < $1.startTime
                             }
                         ) { sp in
-                            scheduledRow(sp, template: template)
+                            scheduledRow(sp)
                         }
                         .onDelete { offsets in
-                            deleteScheduledPlans(offsets, template: template)
+                            vm.deleteScheduled(at: offsets, from: template)
                         }
                     }
 
@@ -214,22 +143,25 @@ struct DayTemplateEditorView: View {
                 template.name.isEmpty ? "Day Template" : template.name
             )
             .navigationBarTitleDisplayMode(.inline)
-            .id(refreshID)
+            .id(vm.refreshID)
         }
     }
 
-    // MARK: - Draft rows (Create mode)
-    private func draftRow(_ draft: PlanEntryDraft) -> some View {
-        let idx = drafts.firstIndex(where: { $0.id == draft.id })!
-        let livePlan = modelContext.plan(with: drafts[idx].planID)
+    // MARK: - Rows
 
-        let title = (livePlan?.title ?? drafts[idx].titleSnapshot)
-        let emoji = (livePlan?.emoji ?? drafts[idx].emojiSnapshot)
+    private func draftRow(_ draft: PlanEntryDraft) -> some View {
+        // Resolve live plan (may be deleted — then we'll show snapshot + badge).
+        let idx = vm.drafts.firstIndex(where: { $0.id == draft.id })!
+        let livePlan = vm.livePlan(for: vm.drafts[idx].planID)
+
+        let title = (livePlan?.title ?? vm.drafts[idx].titleSnapshot)
+        let emoji = (livePlan?.emoji ?? vm.drafts[idx].emojiSnapshot)
 
         let anchoredStart = TimeUtil.anchoredTime(
-            drafts[idx].start, to: anchorDay)
-        let clampedLen = clampMinutes(
-            start: anchoredStart, requestedMinutes: drafts[idx].lengthMinutes)
+            vm.drafts[idx].start, to: vm.anchorDay)
+        let clampedLen = vm.clampMinutes(
+            start: anchoredStart, requestedMinutes: vm.drafts[idx].lengthMinutes
+        )
         let end = anchoredStart.adding(minutes: clampedLen)
 
         return HStack(spacing: 12) {
@@ -253,15 +185,14 @@ struct DayTemplateEditorView: View {
                 DatePicker(
                     "Start",
                     selection: Binding(
-                        get: { drafts[idx].start },
+                        get: { vm.drafts[idx].start },
                         set: { newValue in
                             let anchored = TimeUtil.anchoredTime(
-                                newValue, to: anchorDay)
-                            drafts[idx].start = anchored
-                            drafts[idx].lengthMinutes = clampMinutes(
+                                newValue, to: vm.anchorDay)
+                            vm.drafts[idx].start = anchored
+                            vm.drafts[idx].lengthMinutes = vm.clampMinutes(
                                 start: anchored,
-                                requestedMinutes: drafts[idx].lengthMinutes
-                            )
+                                requestedMinutes: vm.drafts[idx].lengthMinutes)
                         }
                     ),
                     displayedComponents: .hourAndMinute
@@ -271,24 +202,22 @@ struct DayTemplateEditorView: View {
                 LengthPicker(
                     "Length",
                     minutes: Binding(
-                        get: { drafts[idx].lengthMinutes },
+                        get: { vm.drafts[idx].lengthMinutes },
                         set: { newLen in
                             let anchored = TimeUtil.anchoredTime(
-                                drafts[idx].start, to: anchorDay)
-                            drafts[idx].lengthMinutes = clampMinutes(
-                                start: anchored,
-                                requestedMinutes: newLen
-                            )
+                                vm.drafts[idx].start, to: vm.anchorDay)
+                            vm.drafts[idx].lengthMinutes = vm.clampMinutes(
+                                start: anchored, requestedMinutes: newLen)
                         }
                     ),
-                    initialMinutes: max(5, drafts[idx].lengthMinutes)
+                    initialMinutes: max(5, vm.drafts[idx].lengthMinutes)
                 )
             }
         }
         .swipeActions {
-            if modelContext.plan(with: drafts[idx].planID) == nil {
+            if vm.livePlan(for: vm.drafts[idx].planID) == nil {
                 Button(role: .destructive) {
-                    drafts.removeAll { $0.id == draft.id }
+                    vm.drafts.removeAll { $0.id == draft.id }
                 } label: {
                     Label("Remove", systemImage: "trash")
                 }
@@ -296,90 +225,24 @@ struct DayTemplateEditorView: View {
         }
     }
 
-    private func sortedDrafts() -> [PlanEntryDraft] {
-        drafts.sorted {
-            TimeUtil.anchoredTime($0.start, to: anchorDay)
-                < TimeUtil.anchoredTime($1.start, to: anchorDay)
-        }
-    }
-
-    private func deleteDrafts(at offsets: IndexSet) {
-        var arr = sortedDrafts()
-        for i in offsets {
-            let d = arr[i]
-            if let idx = drafts.firstIndex(where: { $0.id == d.id }) {
-                drafts.remove(at: idx)
-            }
-        }
-    }
-
-    private func saveTemplate() {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let template = DayTemplate(name: trimmed.isEmpty ? "New Day" : trimmed)
-        modelContext.insert(template)
-
-        let saveAnchor = anchorDay
-        for draft in drafts {
-            guard let plan = modelContext.plan(with: draft.planID) else {
-                continue
-            }
-            let start = TimeUtil.anchoredTime(draft.start, to: saveAnchor)
-            let minutes = clampMinutes(
-                start: start, requestedMinutes: draft.lengthMinutes)
-            let scheduled = ScheduledPlan(
-                plan: plan, startTime: start,
-                duration: TimeInterval(minutes * 60))
-            scheduled.dayTemplate = template
-            modelContext.insert(scheduled)
-        }
-
-        try? modelContext.save()
-
-        if case let .create(_, onSaved) = mode {
-            onSaved?(template)
-        }
-        dismiss()
-    }
-
-    // MARK: - Scheduled rows (Edit mode)
-    private func scheduledRow(_ sp: ScheduledPlan, template: DayTemplate)
-        -> some View
-    {
+    private func scheduledRow(_ sp: ScheduledPlan) -> some View {
         let startBinding = Binding<Date>(
             get: { sp.startTime },
-            set: { newValue in
-                let anchored = TimeUtil.anchoredTime(newValue, to: anchorDay)
-                sp.startTime = anchored
-                let minutes = clampMinutes(
-                    start: anchored,
-                    requestedMinutes: Int(sp.duration / 60)
-                )
-                sp.duration = TimeInterval(minutes * 60)
-                try? modelContext.save()
-            }
+            set: { newValue in vm.updateScheduled(sp, newStart: newValue) }
         )
 
         let minutesBinding = Binding<Int>(
             get: { max(0, Int(sp.duration / 60)) },
-            set: { newLen in
-                let anchored = TimeUtil.anchoredTime(
-                    sp.startTime, to: anchorDay)
-                let minutes = clampMinutes(
-                    start: anchored, requestedMinutes: newLen)
-                sp.startTime = anchored
-                sp.duration = TimeInterval(minutes * 60)
-                try? modelContext.save()
-            }
+            set: { newLen in vm.updateScheduled(sp, newMinutes: newLen) }
         )
 
         let start = sp.startTime
-        let end = sp.startTime.addingTimeInterval(sp.duration)
+        let end = sp.endTime
         let mins = Int(sp.duration / 60)
 
         return HStack(alignment: .top, spacing: 12) {
             let emoji = sp.plan?.emoji ?? ""
-            Text(emoji.isEmpty ? "🧩" : emoji)
-                .font(.title3)
+            Text(emoji.isEmpty ? "🧩" : emoji).font(.title3)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
@@ -407,18 +270,5 @@ struct DayTemplateEditorView: View {
                     initialMinutes: max(5, minutesBinding.wrappedValue))
             }
         }
-    }
-
-    private func deleteScheduledPlans(
-        _ offsets: IndexSet, template: DayTemplate
-    ) {
-        let sorted = template.scheduledPlans.sorted {
-            $0.startTime < $1.startTime
-        }
-        for idx in offsets {
-            let sp = sorted[idx]
-            modelContext.delete(sp)
-        }
-        try? modelContext.save()
     }
 }

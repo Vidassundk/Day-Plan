@@ -1,55 +1,27 @@
-//
-//  AddOrReusePlanSheet.swift
-//  Day Plan
-//
-//  Restores per-plan Start time input (anchored to caller's day).
-//
-
 import SwiftData
 import SwiftUI
 
-// Small helper so the chosen time-of-day is placed on the anchor day.
-private func anchoredTime(_ time: Date, to anchor: Date) -> Date {
-    let cal = Calendar.current
-    let t = cal.dateComponents([.hour, .minute, .second], from: time)
-    return cal.date(
-        bySettingHour: t.hour ?? 0,
-        minute: t.minute ?? 0,
-        second: t.second ?? 0,
-        of: anchor) ?? anchor
-}
-
-extension Color {
-    static var placeholderText: Color { Color(uiColor: .placeholderText) }
-}
-
+/// Sheet: create a new plan or reuse an existing one, and pick its start/length.
+/// Anchors the chosen time-of-day onto the caller's `anchorDay` to avoid date drift.
 struct AddOrReusePlanSheet: View {
     enum Mode: String, CaseIterable {
         case create = "Create New"
         case reuse = "Reuse Existing"
     }
 
-    // NEW: the day to anchor the time-of-day to
+    /// The day that the chosen time-of-day will be anchored to.
     let anchorDay: Date
 
-    // Callback now returns plan + start + length (per-plan start time)
+    /// Callback returns the chosen plan + anchored start + length.
     let onAdd: (_ plan: Plan, _ start: Date, _ lengthMinutes: Int) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
-    @State private var planPendingDeletion: Plan?
-    private var isShowingDeleteConfirm: Binding<Bool> {
-        Binding(
-            get: { planPendingDeletion != nil },
-            set: { if !$0 { planPendingDeletion = nil } }
-        )
-    }
-
     // UI mode
     @State private var mode: Mode = .create
 
-    // Schedule inputs (both are user-editable)
+    // Schedule inputs (user-editable)
     @State private var start: Date
     @State private var lengthMinutes: Int
 
@@ -58,7 +30,6 @@ struct AddOrReusePlanSheet: View {
     @State private var emoji = ""
     @State private var description = ""
     @State private var chosenColor: Color = .accentColor
-
     @State private var showEmojiPicker = false
 
     // Reuse-existing
@@ -75,7 +46,8 @@ struct AddOrReusePlanSheet: View {
         self.anchorDay = anchorDay
         self.onAdd = onAdd
         _start = State(
-            initialValue: anchoredTime(initialStart ?? .now, to: anchorDay))
+            initialValue: TimeUtil.anchoredTime(
+                initialStart ?? .now, to: anchorDay))
         _lengthMinutes = State(initialValue: max(5, initialLengthMinutes))
     }
 
@@ -84,13 +56,15 @@ struct AddOrReusePlanSheet: View {
             Form {
                 modePickerSection
                 planSection
-                scheduleSection  // Start time + Length here
+                scheduleSection
             }
             .navigationTitle("Add Plan")
             .toolbar { toolbarContent }
             .confirmationDialog(
                 "Delete this plan?",
-                isPresented: isShowingDeleteConfirm,
+                isPresented: Binding(
+                    get: { planPendingDeletion != nil },
+                    set: { if !$0 { planPendingDeletion = nil } }),
                 titleVisibility: .visible
             ) {
                 Button("Delete", role: .destructive) { performDelete() }
@@ -145,8 +119,7 @@ struct AddOrReusePlanSheet: View {
             }
             .buttonStyle(.plain)
             .popover(
-                isPresented: $showEmojiPicker,
-                attachmentAnchor: .rect(.bounds),
+                isPresented: $showEmojiPicker, attachmentAnchor: .rect(.bounds),
                 arrowEdge: .trailing
             ) {
                 EmojiKitPickerView(selection: $emoji)
@@ -157,8 +130,9 @@ struct AddOrReusePlanSheet: View {
             ColorPicker(
                 "Color", selection: $chosenColor, supportsOpacity: false)
         }
-
     }
+
+    @State private var planPendingDeletion: Plan?
 
     @ViewBuilder
     private var reusePlanSection: some View {
@@ -207,8 +181,7 @@ struct AddOrReusePlanSheet: View {
                 initialMinutes: max(5, lengthMinutes))
         }
         .onChange(of: start) { newValue in
-            // keep time-of-day but re-anchor to the provided day (defensive)
-            start = anchoredTime(newValue, to: anchorDay)
+            start = TimeUtil.anchoredTime(newValue, to: anchorDay)
         }
     }
 
@@ -257,7 +230,7 @@ struct AddOrReusePlanSheet: View {
             plan = found
         }
 
-        onAdd(plan, anchoredTime(start, to: anchorDay), lengthMinutes)
+        onAdd(plan, TimeUtil.anchoredTime(start, to: anchorDay), lengthMinutes)
         dismiss()
     }
 
@@ -268,8 +241,6 @@ struct AddOrReusePlanSheet: View {
         try? modelContext.save()
         planPendingDeletion = nil
     }
-
-    // MARK: - Derived
 
     private var canAdd: Bool {
         switch mode {
