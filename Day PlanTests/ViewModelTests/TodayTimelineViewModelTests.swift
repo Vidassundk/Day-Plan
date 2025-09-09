@@ -29,11 +29,21 @@ final class TodayTimelineViewModelTests: XCTestCase {
         let a2 = vm.anchoredNow(late, dayStart: start, dayEnd: end)
         XCTAssertLessThanOrEqual(a2, end)
 
-        // Mid-day → stays same time-of-day on anchor date
+        // Mid-day → stays same time-of-day on anchor date.
+        // Educational note: assert using the SAME calendar that 'anchoredNow'
+        // uses internally (Calendar.current) to avoid time-zone brittleness.
         let mid = FixedDates.make(2026, 5, 5, 14, 20, 0)
         let a3 = vm.anchoredNow(mid, dayStart: start, dayEnd: end)
         let cal = Calendar.current
-        XCTAssertEqual(cal.component(.hour, from: a3), 14)
-        XCTAssertEqual(cal.component(.minute, from: a3), 20)
+
+        XCTAssertEqual(
+            cal.component(.hour, from: a3),
+            cal.component(.hour, from: mid))
+        XCTAssertEqual(
+            cal.component(.minute, from: a3),
+            cal.component(.minute, from: mid))
+        XCTAssertEqual(
+            cal.startOfDay(for: a3),
+            cal.startOfDay(for: start))
     }
 }
