@@ -111,7 +111,7 @@ struct DayTemplateEditorView: View {
                     TextField("Template name", text: $tpl.name)
                 } footer: {
                     Text(
-                        "The day’s start is derived automatically from the earliest plan."
+                        "Times are constrained to the calendar day (00:00–24:00)."
                     )
                     .font(.footnote)
                     .foregroundStyle(.secondary)

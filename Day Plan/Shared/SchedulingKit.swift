@@ -3,7 +3,7 @@ import Foundation
 /// Time helpers used across timeline, editors, and validation flows.
 public enum TimeUtil {
     /// Apply hour:minute:second of `time` onto the **date** of `anchor`.
-    /// Useful for keeping a chosen time while shifting it into a specific day.
+    /// Keeps the chosen clock time while shifting it into a specific day.
     public static func anchoredTime(
         _ time: Date, to anchor: Date, calendar: Calendar = .current
     ) -> Date {
@@ -26,17 +26,28 @@ public enum TimeUtil {
     }
 }
 
-/// Represents a 24-hour window starting at `start`.
+/// Represents a strict 24-hour window starting at `start` (00:00 of a calendar day).
+/// Keep this as the single definition of “what is a day” to avoid drift.
 public struct DayWindow {
     public let start: Date
     public var end: Date { start.addingTimeInterval(24 * 60 * 60) }
 
     public init(start: Date) { self.start = start }
+
+    /// Factory: build a window for the **calendar day** that contains `anchor`.
+    /// NOTE: avoids “user-defined Mondays”; UI and engine stay in sync.
+    public static func ofDay(
+        containing anchor: Date, calendar: Calendar = .current
+    ) -> DayWindow {
+        DayWindow(start: calendar.startOfDay(for: anchor))
+    }
 }
 
-/// Operations that keep schedules within a single-day boundary.
+/// Pure operations that keep schedules within a single-day boundary.
+/// These are easy to unit test and safe to call from Views/VMs.
 public enum DayScheduleEngine {
-    /// Clamp a requested duration (in minutes) so that `start + duration` does not exceed `day.end`.
+    /// Truncate a requested duration (minutes) so that `start + duration` ≤ `day.end`.
+    /// Overlaps with other **plans** can still be allowed by policy, but **not with the day boundary**.
     public static func clampDurationWithinDay(
         start: Date,
         requestedMinutes: Int,
@@ -49,7 +60,7 @@ public enum DayScheduleEngine {
 }
 
 extension Date {
-    /// Add minutes to a `Date` using `TimeInterval`.
+    /// Add minutes to a `Date` using `TimeInterval`. Convenient for editor math.
     public func adding(minutes: Int) -> Date {
         self.addingTimeInterval(TimeInterval(minutes * 60))
     }

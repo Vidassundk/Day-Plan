@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Sheet: create a new plan or reuse an existing one, and pick its start/length.
 /// Anchors the chosen time-of-day onto the caller's `anchorDay` to avoid date drift.
+/// UX rule: we clamp length on every change so users can't pick past midnight.
 struct AddOrReusePlanSheet: View {
     enum Mode: String, CaseIterable {
         case create = "Create New"
@@ -176,12 +177,43 @@ struct AddOrReusePlanSheet: View {
                 "Start", selection: $start, displayedComponents: .hourAndMinute
             )
             .datePickerStyle(.compact)
+
+            // Optional: if your LengthPicker supports a max, pass it.
+            // Otherwise the onChange clamping below still enforces the rule.
+            let window = DayWindow.ofDay(containing: anchorDay)
+            let _ = window  // silence unused if not using max
+            // let maxByDay = max(0, Int(window.end.timeIntervalSince(start) / 60))
+
             LengthPicker(
-                "Length", minutes: $lengthMinutes,
-                initialMinutes: max(5, lengthMinutes))
+                "Length",
+                minutes: $lengthMinutes,
+                initialMinutes: max(5, lengthMinutes)
+                // If LengthPicker has `maxMinutes:` in your build, you can wire:
+                // , maxMinutes: maxByDay
+            )
         }
         .onChange(of: start) { newValue in
+            // Keep the chosen time-of-day but force it onto the anchor calendar day.
             start = TimeUtil.anchoredTime(newValue, to: anchorDay)
+
+            // Recompute allowed minutes and clamp length to midnight.
+            let window = DayWindow.ofDay(containing: anchorDay)
+            let clamped = DayScheduleEngine.clampDurationWithinDay(
+                start: start,
+                requestedMinutes: lengthMinutes,
+                day: window
+            )
+            lengthMinutes = clamped
+        }
+        .onChange(of: lengthMinutes) { newLen in
+            // Defensive: never allow the length to run past midnight.
+            let window = DayWindow.ofDay(containing: anchorDay)
+            let clamped = DayScheduleEngine.clampDurationWithinDay(
+                start: start,
+                requestedMinutes: newLen,
+                day: window
+            )
+            lengthMinutes = clamped
         }
     }
 

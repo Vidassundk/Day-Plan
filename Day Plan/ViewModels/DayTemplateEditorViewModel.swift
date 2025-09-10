@@ -3,6 +3,7 @@ import SwiftData
 
 /// MVVM for `DayTemplateEditorView`.
 /// Owns "create vs edit" flow, drafts, clamping, and persistence.
+/// Architectural rule: this VM defines policy and persistence, while time math lives in the engine.
 @MainActor
 final class DayTemplateEditorViewModel: ObservableObject {
 
@@ -47,29 +48,33 @@ final class DayTemplateEditorViewModel: ObservableObject {
 
     /// Anchor day:
     /// - Create: earliest draft (anchored), or today 00:00.
-    /// - Edit: earliest plan or the template's own `dayStart`.
+    /// - Edit: template's `dayStart` (normalized), or today 00:00.
+    /// Always normalize to `startOfDay` to guarantee a 00:00–24:00 window.
     var anchorDay: Date {
+        let cal = Calendar.current
         switch mode {
         case .create:
-            let fallback = Calendar.current.startOfDay(for: .now)
+            let fallback = cal.startOfDay(for: .now)
             let earliest =
                 drafts
                 .map { TimeUtil.anchoredTime($0.start, to: fallback) }
-                .min()
-            return earliest ?? fallback
+                .min() ?? fallback
+            return cal.startOfDay(for: earliest)
 
         case .edit(let templateID):
             guard
                 let ctx = modelContext,
                 let tpl = ctx.dayTemplate(with: templateID)
             else {
-                return Calendar.current.startOfDay(for: .now)
+                return cal.startOfDay(for: .now)
             }
-            return tpl.dayStart
+            // If stored dayStart was ever not normalized, fix it at read time.
+            return cal.startOfDay(for: tpl.dayStart)
         }
     }
 
     /// Suggest next start time = end of last block (create: draft, edit: scheduled).
+    /// UX note: returns slightly before midnight so pickers don't snap to 24:00 exactly.
     func suggestedInitialStart() -> Date {
         let anchor = anchorDay
         let endOfDay = anchor.addingTimeInterval(24 * 60 * 60)
@@ -98,6 +103,7 @@ final class DayTemplateEditorViewModel: ObservableObject {
     // MARK: - Write (Create)
 
     /// Add a new draft block in create mode.
+    /// The start time is anchored onto `anchorDay`, and the length is truncated to midnight.
     func appendDraft(plan: Plan, start: Date, lengthMinutes: Int) {
         let anchoredStart = TimeUtil.anchoredTime(start, to: anchorDay)
         let clamped = clampMinutes(
@@ -116,6 +122,8 @@ final class DayTemplateEditorViewModel: ObservableObject {
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let tpl = DayTemplate(name: trimmed.isEmpty ? "New Day" : trimmed)
+        // Optional normalization if you set dayStart here in the future:
+        // tpl.dayStart = Calendar.current.startOfDay(for: tpl.dayStart)
         ctx.insert(tpl)
 
         let saveAnchor = anchorDay
@@ -156,7 +164,8 @@ final class DayTemplateEditorViewModel: ObservableObject {
 
     // MARK: - Write (Edit)
 
-    /// Add a scheduled plan directly to an existing template.
+    /// Add a scheduled plan directly to an existing template (edit mode).
+    /// Retains overlap policy (allowed), but never exceeds the day boundary.
     func addScheduled(
         to templateID: UUID, plan: Plan, start: Date, lengthMinutes: Int
     ) {
@@ -173,6 +182,7 @@ final class DayTemplateEditorViewModel: ObservableObject {
         refreshID = UUID()
     }
 
+    /// Update a scheduled plan's start and/or duration with truncation at midnight.
     func updateScheduled(
         _ sp: ScheduledPlan, newStart: Date? = nil, newMinutes: Int? = nil
     ) {
@@ -200,7 +210,7 @@ final class DayTemplateEditorViewModel: ObservableObject {
         try? ctx.save()
     }
 
-    // MARK: - Utilities
+    // MARK: - Utilities (delegate to engine)
 
     /// Clamp a requested duration (minutes) so that `start + duration` stays within the same day.
     func clampMinutes(start: Date, requestedMinutes: Int) -> Int {
@@ -212,10 +222,10 @@ final class DayTemplateEditorViewModel: ObservableObject {
     }
 
     /// Maximum minutes allowed from a given `start` until the end of the 24h window.
-    /// The view uses this to **limit** pickers so overflow is impossible.
+    /// Views can use this to **limit** pickers so overflow is impossible.
     func maxSelectableMinutes(from start: Date) -> Int {
-        let end = anchorDay.addingTimeInterval(24 * 60 * 60)
-        return max(0, Int(end.timeIntervalSince(start) / 60))
+        let window = DayWindow.ofDay(containing: anchorDay)
+        return max(0, Int(window.end.timeIntervalSince(start) / 60))
     }
 
     /// Live fetch of a `Plan` if it still exists (useful for showing "Deleted" labels).
