@@ -405,6 +405,7 @@ struct TimelineSpineRow: View {
     /// VoiceOver summary of the row.
     private var accessibilityText: Text {
         let title = Text(sp.plan?.title ?? "Untitled")
+
         let time = Text(
             "\(start.formatted(date: .omitted, time: .shortened)) to \(end.formatted(date: .omitted, time: .shortened))"
         )
