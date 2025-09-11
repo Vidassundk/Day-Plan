@@ -3,11 +3,18 @@ import SwiftData
 import SwiftUI
 
 /// MVVM for `TodayTimelineView`.
-/// Fetches the template + plans and supplies derived timeline state.
+/// Owns *derived* timeline state and policy for "what counts as today".
+/// - No UI code here (formatting/layout lives in the views).
+/// - Time math rules delegate to the engine (`DayWindow`, `TimeUtil`).
 @MainActor
 final class TodayTimelineViewModel: ObservableObject {
+    // MARK: Identity & data access
     private let templateID: UUID
     private weak var modelContext: ModelContext?
+
+    /// Inject a clock to make time-dependent logic testable.
+    /// Default uses the system clock; tests can override with a fixed value.
+    var nowProvider: () -> Date = { Date() }
 
     init(templateID: UUID) {
         self.templateID = templateID
@@ -17,6 +24,7 @@ final class TodayTimelineViewModel: ObservableObject {
         self.modelContext = context
     }
 
+    // MARK: - Data queries (optional helpers; the view also uses @Query)
     func template() -> DayTemplate? {
         modelContext?.dayTemplate(with: templateID)
     }
@@ -25,17 +33,22 @@ final class TodayTimelineViewModel: ObservableObject {
         modelContext?.scheduledPlans(for: templateID) ?? []
     }
 
-    func dayBounds(for template: DayTemplate) -> (start: Date, end: Date) {
-        let start = template.startTime
-        return (start, start.addingTimeInterval(24 * 60 * 60))
+    // MARK: - Day policy (00:00–24:00 single, strict calendar day)
+    /// The window for **today** (in the user's current calendar/timezone).
+    /// This is the single source of truth for the day's start/end everywhere in the timeline UI.
+    func dayWindow(for date: Date? = nil) -> DayWindow {
+        let anchor = date ?? nowProvider()
+        return DayWindow.ofDay(containing: anchor)
     }
 
-    /// Clamp `date` to be within `[dayStart, dayEnd]` but keep the time-of-day.
+    /// Clamp `date` into `[dayStart, dayEnd]` *while keeping the chosen time-of-day*.
+    /// This keeps TimelineView's `context.date` safely inside today's visible domain.
     func anchoredNow(_ date: Date, dayStart: Date, dayEnd: Date) -> Date {
         let anchored = TimeUtil.anchoredTime(date, to: dayStart)
         return min(max(anchored, dayStart), dayEnd)
     }
 
+    // MARK: - Row coloring / status (view uses this for spine blending)
     enum Status { case past, current, upcoming }
 
     func status(of sp: ScheduledPlan, now: Date) -> Status {
@@ -47,11 +60,18 @@ final class TodayTimelineViewModel: ObservableObject {
     }
 
     /// The color a row contributes to the vertical spine (used by neighbors).
+    /// Design intent:
+    /// - past → primary (de-emphasized)
+    /// - current → plan tint (accented)
+    /// - upcoming → separator (quiet)
     func outputColor(for sp: ScheduledPlan, now: Date) -> Color {
         switch status(of: sp, now: now) {
-        case .past: return .primary
-        case .current: return sp.plan?.tintColor ?? .accentColor
-        case .upcoming: return Color(uiColor: .separator)
+        case .past:
+            return .primary
+        case .current:
+            return sp.plan?.tintColor ?? .accentColor
+        case .upcoming:
+            return Color(uiColor: .separator)
         }
     }
 }

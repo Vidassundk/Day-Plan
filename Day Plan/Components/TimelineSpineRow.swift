@@ -9,7 +9,6 @@ struct TimelineSpineRow: View {
     let sp: ScheduledPlan
     let isFirst: Bool
     let isLast: Bool
-    let dayStart: Date
     let now: Date
     let showSpine: Bool
 
@@ -40,7 +39,6 @@ struct TimelineSpineRow: View {
         self.sp = sp
         self.isFirst = isFirst
         self.isLast = isLast
-        self.dayStart = dayStart
         self.now = now
         self.showSpine = showSpine
         self.topFromColor = topFromColor
