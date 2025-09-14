@@ -28,7 +28,7 @@ struct TimelineSpineRow: View {
         sp: ScheduledPlan,
         isFirst: Bool,
         isLast: Bool,
-        dayStart: Date,
+        dayStart: Date,  // legacy param kept for call-site compatibility (unused)
         now: Date,
         showSpine: Bool = true,
         topFromColor: Color? = nil,
@@ -71,11 +71,47 @@ struct TimelineSpineRow: View {
 
     private var leftColumnWidth: CGFloat { dotDiameter + 16 }
 
-    // MARK: Derived (via VM)
+    // MARK: Card size bands (duration → visual size buckets)
+    /// Buckets that map **duration (minutes)** into a bounded set of visual sizes.
+    /// Design goals:
+    /// - Short items shouldn’t feel identical to long ones.
+    /// - Very long items shouldn’t dominate the screen.
+    /// - Five tiers are easy to scan and tune.
+    private enum CardSizeBand: Int, CaseIterable { case xs, s, m, l, xl }
+
+    /// Map minutes → size band. Tune thresholds to your content.
+    /// XS: ≤30m • S: ≤1h • M: ≤2h • L: ≤3h • XL: >3h
+    private func band(for minutes: Int) -> CardSizeBand {
+        switch minutes {
+        case ..<31: return .xs
+        case ..<61: return .s
+        case ..<121: return .m
+        case ..<181: return .l
+        default: return .xl
+        }
+    }
+
+    /// Visual min-heights per band. These bound the card growth.
+    private func minHeight(for band: CardSizeBand) -> CGFloat {
+        switch band {
+        case .xs: return 56  // compact
+        case .s: return 72
+        case .m: return 92
+        case .l: return 116
+        case .xl: return 140  // cap
+        }
+    }
+
+    // MARK: Derived (via VM + local mapping)
     private var start: Date { sp.startTime }
     private var end: Date { sp.endTime }
     private var status: TimelineSpineRowViewModel.Status { vm.status(now: now) }
     private var liveProgress: Double { vm.liveProgress(now: now) }
+
+    /// Duration in **minutes** (rounded down). We map this to a size band.
+    private var durationMinutes: Int { max(0, Int(sp.duration / 60)) }
+    private var sizeBand: CardSizeBand { band(for: durationMinutes) }
+    private var cardMinHeight: CGFloat { minHeight(for: sizeBand) }
 
     // MARK: Anim state
     @State private var displayedProgress: Double = 0
@@ -178,30 +214,43 @@ struct TimelineSpineRow: View {
     }
 
     /// The “card” to the right of the spine (title, times, progress).
+    /// Size is **bounded** by a duration→band map so long plans feel larger
+    /// without overwhelming shorter plans.
     private var card: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(sp.plan?.title ?? "Untitled").font(.headline)
-                Spacer(minLength: 8)
-                if status == .current { nowTag }
+        ZStack(alignment: .topTrailing) {
+
+            // Main content — vertically centered within available height
+            VStack(alignment: .leading, spacing: 8) {
+                Text(sp.plan?.title ?? "Untitled")
+                    .font(.headline)
+
+                Text(vm.timeRangeString())
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if status == .current {
+                    ProgressView(value: displayedProgress)
+                        .progressViewStyle(.linear)
+                        .tint(planTint)
+                        .animation(
+                            isCollapsing ? nil : .linear(duration: 0.6),
+                            value: displayedProgress
+                        )
+                        .blur(radius: isCollapsing ? 1.2 : 0)
+                }
             }
+            // Center the block vertically inside the card
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .center)
 
-            Text(vm.timeRangeString())
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
+            // “Now” tag sticks to the top-right, inside the padding
             if status == .current {
-                ProgressView(value: displayedProgress)
-                    .progressViewStyle(.linear)
-                    .tint(planTint)
-                    .animation(
-                        isCollapsing ? nil : .linear(duration: 0.6),
-                        value: displayedProgress
-                    )
-                    .blur(radius: isCollapsing ? 1.2 : 0)
+                nowTag
             }
         }
         .padding(12)
+        // Apply size BEFORE background so the rounded rect stretches with it
+        .frame(minHeight: cardMinHeight, alignment: .center)
         .background(
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
