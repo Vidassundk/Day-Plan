@@ -74,4 +74,20 @@ final class TodayTimelineViewModel: ObservableObject {
             return Color(uiColor: .separator)
         }
     }
+
+    /// Project a scheduled plan’s start onto the visible day window.
+    func projectedStart(for sp: ScheduledPlan, in window: DayWindow) -> Date {
+        TimeUtil.anchoredTime(sp.startTime, to: window.start)
+    }
+
+    /// End-of-block projected into today's window using strict clamping.
+    /// This avoids the "00:00 means already finished" bug.
+    func projectedEnd(for sp: ScheduledPlan, in window: DayWindow) -> Date {
+        let start = projectedStart(for: sp, in: window)
+        // Clamp to avoid spilling across 24:00
+        let minutes = DayScheduleEngine.clampDurationWithinDay(
+            start: start, requestedMinutes: Int(sp.duration / 60), day: window
+        )
+        return start.addingTimeInterval(TimeInterval(minutes * 60))
+    }
 }

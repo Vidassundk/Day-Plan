@@ -59,8 +59,11 @@ struct TodayTimelineView: View {
                     // Decide when to show the vertical spine automatically:
                     // - Always show if user forces it
                     // - Auto-hide once the day has fully completed
-                    let lastEnd = plans.last?.endTime ?? window.start
-                    let dayComplete = now >= lastEnd
+                    let projectedEnds = plans.map {
+                        vm.projectedEnd(for: $0, in: window)
+                    }
+                    let lastEndToday = projectedEnds.max() ?? window.start
+                    let dayComplete = now >= lastEndToday
                     let showSpine =
                         (gutterMode == .show)
                         || (gutterMode == .auto && !dayComplete)
@@ -139,6 +142,7 @@ struct TodayTimelineView: View {
                             .padding(.vertical, 8)
                         }
                         .scrollIndicators(.never)
+
                     }
                 }
             } else {
