@@ -3,7 +3,8 @@ import SwiftUI
 
 /// A single timeline row: vertical spine + dot + plan card.
 /// - Uses `TimelineSpineRowViewModel` for status/progress calculations.
-/// - View focuses on layout/drawing; VM provides testable logic.
+/// - In edit mode, the card visually stretches toward "real time" height while the
+///   list structure remains unchanged (no gestures or state commits yet).
 struct TimelineSpineRow: View {
     // MARK: Inputs from parent
     let sp: ScheduledPlan
@@ -20,6 +21,11 @@ struct TimelineSpineRow: View {
     let topJunctionMid: Color?
     let bottomJunctionMid: Color?
 
+    /// Visual-only edit mode: affects card height and spine visibility (spine hidden by parent).
+    let isEditing: Bool
+    /// Visual scale for edit mode (px per minute). Cards stretch toward duration × scale.
+    let editMinuteHeight: CGFloat
+
     // MARK: VM
     @StateObject private var vm: TimelineSpineRowViewModel
 
@@ -34,7 +40,9 @@ struct TimelineSpineRow: View {
         topFromColor: Color? = nil,
         bottomToColor: Color? = nil,
         topJunctionMid: Color? = nil,
-        bottomJunctionMid: Color? = nil
+        bottomJunctionMid: Color? = nil,
+        isEditing: Bool = false,
+        editMinuteHeight: CGFloat = 1.4
     ) {
         self.sp = sp
         self.isFirst = isFirst
@@ -45,6 +53,8 @@ struct TimelineSpineRow: View {
         self.bottomToColor = bottomToColor
         self.topJunctionMid = topJunctionMid
         self.bottomJunctionMid = bottomJunctionMid
+        self.isEditing = isEditing
+        self.editMinuteHeight = editMinuteHeight
         _vm = StateObject(wrappedValue: TimelineSpineRowViewModel(sp: sp))
     }
 
@@ -72,15 +82,7 @@ struct TimelineSpineRow: View {
     private var leftColumnWidth: CGFloat { dotDiameter + 16 }
 
     // MARK: Card size bands (duration → visual size buckets)
-    /// Buckets that map **duration (minutes)** into a bounded set of visual sizes.
-    /// Design goals:
-    /// - Short items shouldn’t feel identical to long ones.
-    /// - Very long items shouldn’t dominate the screen.
-    /// - Five tiers are easy to scan and tune.
     private enum CardSizeBand: Int, CaseIterable { case xs, s, m, l, xl }
-
-    /// Map minutes → size band. Tune thresholds to your content.
-    /// XS: ≤30m • S: ≤1h • M: ≤2h • L: ≤3h • XL: >3h
     private func band(for minutes: Int) -> CardSizeBand {
         switch minutes {
         case ..<31: return .xs
@@ -90,15 +92,13 @@ struct TimelineSpineRow: View {
         default: return .xl
         }
     }
-
-    /// Visual min-heights per band. These bound the card growth.
     private func minHeight(for band: CardSizeBand) -> CGFloat {
         switch band {
-        case .xs: return 56  // compact
+        case .xs: return 56
         case .s: return 72
         case .m: return 92
         case .l: return 116
-        case .xl: return 140  // cap
+        case .xl: return 140
         }
     }
 
@@ -108,10 +108,19 @@ struct TimelineSpineRow: View {
     private var status: TimelineSpineRowViewModel.Status { vm.status(now: now) }
     private var liveProgress: Double { vm.liveProgress(now: now) }
 
-    /// Duration in **minutes** (rounded down). We map this to a size band.
     private var durationMinutes: Int { max(0, Int(sp.duration / 60)) }
     private var sizeBand: CardSizeBand { band(for: durationMinutes) }
-    private var cardMinHeight: CGFloat { minHeight(for: sizeBand) }
+    private var bandedMinHeight: CGFloat { minHeight(for: sizeBand) }
+
+    /// Visual edit height target: grow toward real-time minutes × scale, never smaller than banded min.
+    private var editTargetHeight: CGFloat {
+        max(bandedMinHeight, CGFloat(durationMinutes) * editMinuteHeight + 44)  // +44 for breathing room
+    }
+
+    /// The card's current minHeight depends on the mode; animates smoothly between the two.
+    private var cardMinHeight: CGFloat {
+        isEditing ? editTargetHeight : bandedMinHeight
+    }
 
     // MARK: Anim state
     @State private var displayedProgress: Double = 0
@@ -141,13 +150,12 @@ struct TimelineSpineRow: View {
         }
     }
 
-    // Dot visibility/fill
     private var showDot: Bool { status != .past }
     private var dotFill: Color {
         switch status {
         case .current: return planTint
         case .upcoming: return separator
-        case .past: return separator  // not used (showDot == false)
+        case .past: return separator
         }
     }
 
@@ -169,7 +177,7 @@ struct TimelineSpineRow: View {
                 )
                 .accessibilityHidden(!showSpine)
         }
-        .animation(.easeInOut(duration: gutterAnimDuration), value: showSpine)
+        .animation(.easeInOut(duration: 0.28), value: isEditing)  // animates height change
         .onAppear {
             currentGutter = showSpine ? (leftColumnWidth + gapWidth) : 0
             displayedProgress = liveProgress
@@ -213,16 +221,12 @@ struct TimelineSpineRow: View {
             .accessibilityHidden(true)
     }
 
-    /// The “card” to the right of the spine (title, times, progress).
-    /// Size is **bounded** by a duration→band map so long plans feel larger
-    /// without overwhelming shorter plans.
+    /// Card surface. In edit mode, we center the content vertically while keeping the “Now” tag
+    /// pinned to top-right. Min-height animates between banded and real-time targets.
     private var card: some View {
         ZStack(alignment: .topTrailing) {
-
-            // Main content — vertically centered within available height
             VStack(alignment: .leading, spacing: 8) {
-                Text(sp.plan?.title ?? "Untitled")
-                    .font(.headline)
+                Text(sp.plan?.title ?? "Untitled").font(.headline)
 
                 Text(vm.timeRangeString())
                     .font(.footnote)
@@ -239,18 +243,15 @@ struct TimelineSpineRow: View {
                         .blur(radius: isCollapsing ? 1.2 : 0)
                 }
             }
-            // Center the block vertically inside the card
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .center)
+            .frame(maxHeight: .infinity, alignment: isEditing ? .center : .top)  // center in edit mode
 
-            // “Now” tag sticks to the top-right, inside the padding
             if status == .current {
                 nowTag
             }
         }
         .padding(12)
-        // Apply size BEFORE background so the rounded rect stretches with it
-        .frame(minHeight: cardMinHeight, alignment: .center)
+        .frame(minHeight: cardMinHeight, alignment: .center)  // animate between banded and real-time
         .background(
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -261,7 +262,7 @@ struct TimelineSpineRow: View {
         .accessibilityLabel(accessibilityText)
     }
 
-    /// The vertical line + central dot column.
+    /// The vertical line + central dot column (hidden by parent in edit mode).
     private var spine: some View {
         ZStack {
             GeometryReader { geo in
@@ -287,7 +288,6 @@ struct TimelineSpineRow: View {
                             cx: cx, fromY: 0, toY: topEndY, style: Color.primary
                         )
                     }
-
                 case .current:
                     if isFirst {
                         let g = LinearGradient(
@@ -312,7 +312,6 @@ struct TimelineSpineRow: View {
                             endPoint: endPt)
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     }
-
                 case .upcoming:
                     vline(cx: cx, fromY: 0, toY: topEndY, style: separator)
                 }
@@ -332,7 +331,6 @@ struct TimelineSpineRow: View {
                             cx: cx, fromY: bottomStartY - px, toY: h + px,
                             style: Color.primary)
                     }
-
                 case .current:
                     if !isLast {
                         if let mid = bottomJunctionMid {
@@ -359,7 +357,6 @@ struct TimelineSpineRow: View {
                                 style: g)
                         }
                     }
-
                 case .upcoming:
                     if !isLast {
                         vline(
@@ -440,7 +437,6 @@ struct TimelineSpineRow: View {
 
     // MARK: Helpers
 
-    /// Draw a vertical line segment at `cx`.
     private func vline<S: ShapeStyle>(
         cx: CGFloat, fromY: CGFloat, toY: CGFloat, style: S
     ) -> some View {
@@ -451,10 +447,8 @@ struct TimelineSpineRow: View {
         .stroke(style, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
     }
 
-    /// VoiceOver summary of the row.
     private var accessibilityText: Text {
         let title = Text(sp.plan?.title ?? "Untitled")
-
         let time = Text(
             "\(start.formatted(date: .omitted, time: .shortened)) to \(end.formatted(date: .omitted, time: .shortened))"
         )
@@ -473,9 +467,6 @@ struct TimelineSpineRow: View {
 
 enum TimelineGapKind { case between, beforeFirst }
 
-/// A small “time until …” row used either:
-/// - between two items (counting down to the next), or
-/// - before the first item (counting down to the start of the day).
 struct TimelineGapRow: View {
     let minutesUntil: Int
     let showSpine: Bool
