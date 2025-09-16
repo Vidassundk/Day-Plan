@@ -3,8 +3,7 @@ import SwiftUI
 
 /// A single timeline row: vertical spine + dot + plan card.
 /// - Uses `TimelineSpineRowViewModel` for status/progress calculations.
-/// - In edit mode, the card visually stretches toward "real time" height while the
-///   list structure remains unchanged (no gestures or state commits yet).
+/// - In edit mode, cards render at exact time height for accurate alignment against the hour grid.
 struct TimelineSpineRow: View {
     // MARK: Inputs from parent
     let sp: ScheduledPlan
@@ -23,7 +22,7 @@ struct TimelineSpineRow: View {
 
     /// Visual-only edit mode: affects card height and spine visibility (spine hidden by parent).
     let isEditing: Bool
-    /// Visual scale for edit mode (px per minute). Cards stretch toward duration × scale.
+    /// Visual scale for edit mode (px per minute). Cards stretch to duration × scale.
     let editMinuteHeight: CGFloat
 
     // MARK: VM
@@ -34,7 +33,7 @@ struct TimelineSpineRow: View {
         sp: ScheduledPlan,
         isFirst: Bool,
         isLast: Bool,
-        dayStart: Date,  // legacy param kept for call-site compatibility (unused)
+        dayStart: Date,  // retained for call-site compatibility
         now: Date,
         showSpine: Bool = true,
         topFromColor: Color? = nil,
@@ -85,7 +84,7 @@ struct TimelineSpineRow: View {
     private var totalGutter: CGFloat { leftColumnWidth + gapWidth }
     private var keepGutterSpace: Bool { isEditing || showSpine }
 
-    // MARK: Card size bands (duration → visual size buckets)
+    // MARK: Card size bands (view mode “pleasant” heights)
     private enum CardSizeBand: Int, CaseIterable { case xs, s, m, l, xl }
     private func band(for minutes: Int) -> CardSizeBand {
         switch minutes {
@@ -116,14 +115,12 @@ struct TimelineSpineRow: View {
     private var sizeBand: CardSizeBand { band(for: durationMinutes) }
     private var bandedMinHeight: CGFloat { minHeight(for: sizeBand) }
 
-    /// Visual edit height target: grow toward real-time minutes × scale, never smaller than banded min.
-    private var editTargetHeight: CGFloat {
-        max(bandedMinHeight, CGFloat(durationMinutes) * editMinuteHeight + 44)
+    /// Exact visual height for Edit; banded face height for View.
+    private var editExactHeight: CGFloat {
+        CGFloat(durationMinutes) * editMinuteHeight
     }
-
-    /// The card's current minHeight depends on the mode; animates smoothly between the two.
-    private var cardMinHeight: CGFloat {
-        isEditing ? editTargetHeight : bandedMinHeight
+    private var cardHeight: CGFloat {
+        isEditing ? editExactHeight : bandedMinHeight
     }
 
     // MARK: Anim state
@@ -229,8 +226,7 @@ struct TimelineSpineRow: View {
             .accessibilityHidden(true)
     }
 
-    /// Card surface. In edit mode, we center the content vertically while keeping the “Now” tag
-    /// pinned to top-right. Min-height animates between banded and real-time targets.
+    /// Card surface. In edit mode, content is top-aligned inside an exact-height block.
     private var card: some View {
         ZStack(alignment: .topTrailing) {
             VStack(alignment: .leading, spacing: 8) {
@@ -252,19 +248,18 @@ struct TimelineSpineRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: isEditing ? .center : .top)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             if status == .current { nowTag }
         }
         .padding(12)
-        .frame(minHeight: cardMinHeight, alignment: .center)
+        .frame(height: cardHeight, alignment: .top)
         .background(
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .opacity(status == .past ? 0.6 : 1)
         .padding(.vertical, isEditing ? 0 : 8)
-
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
