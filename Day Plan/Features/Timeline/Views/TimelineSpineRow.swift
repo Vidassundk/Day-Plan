@@ -81,6 +81,10 @@ struct TimelineSpineRow: View {
 
     private var leftColumnWidth: CGFloat { dotDiameter + 16 }
 
+    // Reserve gutter in Edit mode to keep horizontal card width stable while the spine hides.
+    private var totalGutter: CGFloat { leftColumnWidth + gapWidth }
+    private var keepGutterSpace: Bool { isEditing || showSpine }
+
     // MARK: Card size bands (duration → visual size buckets)
     private enum CardSizeBand: Int, CaseIterable { case xs, s, m, l, xl }
     private func band(for minutes: Int) -> CardSizeBand {
@@ -114,7 +118,7 @@ struct TimelineSpineRow: View {
 
     /// Visual edit height target: grow toward real-time minutes × scale, never smaller than banded min.
     private var editTargetHeight: CGFloat {
-        max(bandedMinHeight, CGFloat(durationMinutes) * editMinuteHeight + 44)  // +44 for breathing room
+        max(bandedMinHeight, CGFloat(durationMinutes) * editMinuteHeight + 44)
     }
 
     /// The card's current minHeight depends on the mode; animates smoothly between the two.
@@ -154,8 +158,7 @@ struct TimelineSpineRow: View {
     private var dotFill: Color {
         switch status {
         case .current: return planTint
-        case .upcoming: return separator
-        case .past: return separator
+        case .upcoming, .past: return separator
         }
     }
 
@@ -177,9 +180,9 @@ struct TimelineSpineRow: View {
                 )
                 .accessibilityHidden(!showSpine)
         }
-        .animation(.easeInOut(duration: 0.28), value: isEditing)  // animates height change
+        .animation(.easeInOut(duration: 0.28), value: isEditing)  // height transition
         .onAppear {
-            currentGutter = showSpine ? (leftColumnWidth + gapWidth) : 0
+            currentGutter = keepGutterSpace ? totalGutter : 0
             displayedProgress = liveProgress
         }
         .onChange(of: liveProgress) { new in
@@ -191,15 +194,20 @@ struct TimelineSpineRow: View {
                 }
             }
         }
-        .onChange(of: showSpine) { newValue in
+        .onChange(of: showSpine) { _ in
             isCollapsing = true
             withAnimation(.easeInOut(duration: gutterAnimDuration)) {
-                currentGutter = newValue ? (leftColumnWidth + gapWidth) : 0
+                currentGutter = keepGutterSpace ? totalGutter : 0
             }
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + gutterAnimDuration + 0.02
             ) {
                 isCollapsing = false
+            }
+        }
+        .onChange(of: isEditing) { _ in
+            withAnimation(.easeInOut(duration: gutterAnimDuration)) {
+                currentGutter = keepGutterSpace ? totalGutter : 0
             }
         }
     }
@@ -244,20 +252,19 @@ struct TimelineSpineRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: isEditing ? .center : .top)  // center in edit mode
+            .frame(maxHeight: .infinity, alignment: isEditing ? .center : .top)
 
-            if status == .current {
-                nowTag
-            }
+            if status == .current { nowTag }
         }
         .padding(12)
-        .frame(minHeight: cardMinHeight, alignment: .center)  // animate between banded and real-time
+        .frame(minHeight: cardMinHeight, alignment: .center)
         .background(
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .opacity(status == .past ? 0.6 : 1)
-        .padding(.vertical, 8)
+        .padding(.vertical, isEditing ? 0 : 8)
+
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
@@ -393,7 +400,6 @@ struct TimelineSpineRow: View {
                                 }
                                 .shadow(
                                     radius: status == .current ? 2 : 0, y: 1)
-
                         case .squircle:
                             RoundedRectangle(
                                 cornerRadius: dotCornerRadius,
@@ -470,6 +476,7 @@ enum TimelineGapKind { case between, beforeFirst }
 struct TimelineGapRow: View {
     let minutesUntil: Int
     let showSpine: Bool
+    let isEditing: Bool
     let kind: TimelineGapKind
 
     // Keep in sync with `TimelineSpineRow.leftColumnWidth` (dotDiameter + 16)
@@ -481,9 +488,16 @@ struct TimelineGapRow: View {
     @State private var currentGutter: CGFloat = 0
     private var separator: Color { Color(uiColor: .separator) }
 
-    init(minutesUntil: Int, showSpine: Bool, kind: TimelineGapKind = .between) {
+    private var totalGutter: CGFloat { leftColumnWidth + gapWidth }
+    private var keepGutterSpace: Bool { isEditing || showSpine }
+
+    init(
+        minutesUntil: Int, showSpine: Bool, isEditing: Bool,
+        kind: TimelineGapKind = .between
+    ) {
         self.minutesUntil = minutesUntil
         self.showSpine = showSpine
+        self.isEditing = isEditing
         self.kind = kind
     }
 
@@ -505,11 +519,16 @@ struct TimelineGapRow: View {
                 .accessibilityHidden(!showSpine)
         }
         .onAppear {
-            currentGutter = showSpine ? (leftColumnWidth + gapWidth) : 0
+            currentGutter = keepGutterSpace ? totalGutter : 0
         }
-        .onChange(of: showSpine) { new in
+        .onChange(of: showSpine) { _ in
             withAnimation(.easeInOut(duration: gutterAnimDuration)) {
-                currentGutter = new ? (leftColumnWidth + gapWidth) : 0
+                currentGutter = keepGutterSpace ? totalGutter : 0
+            }
+        }
+        .onChange(of: isEditing) { _ in
+            withAnimation(.easeInOut(duration: gutterAnimDuration)) {
+                currentGutter = keepGutterSpace ? totalGutter : 0
             }
         }
     }

@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 /// Renders today's timeline for a given template ID.
 /// Uses live `@Query` for the template and its scheduled plans to avoid
@@ -55,6 +56,38 @@ struct TodayTimelineView: View {
         )
     }
 
+    // Unified spine policy (derived from both pickers)
+    private enum SpinePolicy { case always, autoUntilComplete, hidden }
+
+    private func spinePolicy(for mode: Mode, gutterMode: GutterMode)
+        -> SpinePolicy
+    {
+        // Edit mode always hides the spine; View mode uses the gutter picker.
+        if mode == .edit { return .hidden }
+        switch gutterMode {
+        case .show: return .always
+        case .hide: return .hidden
+        case .auto: return .autoUntilComplete
+        }
+    }
+
+    private func shouldShowSpine(
+        now: Date,
+        plans: [ScheduledPlan],
+        window: DayWindow
+    ) -> Bool {
+        switch spinePolicy(for: mode, gutterMode: gutterMode) {
+        case .always: return true
+        case .hidden: return false
+        case .autoUntilComplete:
+            let lastEndToday =
+                plans
+                .map { vm.projectedEnd(for: $0, in: window) }  // now matches the expected type
+                .max() ?? window.start
+            return now < lastEndToday
+        }
+    }
+
     var body: some View {
         Group {
             if templateResults.first != nil {
@@ -64,112 +97,99 @@ struct TodayTimelineView: View {
                     headerControls
 
                     TimelineView(.periodic(from: .now, by: tick)) { context in
+                        let window = vm.dayWindow()  // compute here so types are crystal-clear
                         let plans = scheduled
                         let now = vm.anchoredNow(
                             context.date, dayStart: window.start,
-                            dayEnd: window.end
-                        )
+                            dayEnd: window.end)
 
-                        // Compute view-mode "auto" behavior
-                        let projectedEnds = plans.map {
-                            vm.projectedEnd(for: $0, in: window)
-                        }
-                        let lastEndToday = projectedEnds.max() ?? window.start
-                        let dayComplete = now >= lastEndToday
-
-                        let showSpineInViewMode =
-                            (gutterMode == .show)
-                            || (gutterMode == .auto && !dayComplete)
-
-                        // Force spine hidden in edit mode; show hours grid instead.
-                        let showSpine =
-                            (mode == .view) ? showSpineInViewMode : false
+                        let showSpine = shouldShowSpine(
+                            now: now, plans: plans, window: window)
                         let showHoursGrid = (mode == .edit)
 
-                        if plans.isEmpty {
-                            emptyState
-                        } else {
-                            // We layer a single continuous HoursGrid behind the list when editing.
-                            ScrollView {
-                                ZStack(alignment: .topLeading) {
-                                    if showHoursGrid {
-                                        HoursGridLayer(
-                                            minuteHeight: editMinuteHeight,
-                                            start: window.start
-                                        )
-                                        // 24h track height; allows scrolling the whole day
-                                        .frame(height: 1440 * editMinuteHeight)
-                                        .transition(
-                                            .opacity.combined(with: .scale))
-                                    }
-
-                                    // The list sits above. In edit mode, cards animate their
-                                    // minHeight toward real-time height; we keep the same list structure.
-                                    LazyVStack(alignment: .leading, spacing: 0)
-                                    {
-                                        // BEFORE FIRST PLAN gap
-                                        if let first = plans.first,
-                                            now < first.startTime
-                                        {
-                                            let minsLeft = max(
-                                                0,
-                                                Int(
-                                                    first.startTime
-                                                        .timeIntervalSince(now)
-                                                        / 60)
+                        Group {
+                            if plans.isEmpty {
+                                emptyState
+                            } else {
+                                ScrollView {
+                                    ZStack(alignment: .topLeading) {
+                                        if showHoursGrid {
+                                            HoursGridLayer(
+                                                minuteHeight: editMinuteHeight,
+                                                start: window.start
                                             )
-                                            TimelineGapRow(
-                                                minutesUntil: minsLeft,
-                                                showSpine: showSpine,
-                                                kind: .beforeFirst
+                                            .frame(
+                                                height: 1440 * editMinuteHeight
                                             )
-                                            .transition(.opacity)
+                                            .transition(
+                                                .opacity.combined(with: .scale))
                                         }
 
-                                        // PLANS
-                                        ForEach(plans.indices, id: \.self) {
-                                            i in
-                                            let sp = plans[i]
+                                        LazyVStack(
+                                            alignment: .leading, spacing: 0
+                                        ) {
+                                            if let first = plans.first,
+                                                now < first.startTime
+                                            {
+                                                let minsLeft = max(
+                                                    0,
+                                                    Int(
+                                                        first.startTime
+                                                            .timeIntervalSince(
+                                                                now) / 60))
+                                                TimelineGapRow(
+                                                    minutesUntil: minsLeft,
+                                                    showSpine: showSpine,
+                                                    isEditing: (mode == .edit),
+                                                    kind: .beforeFirst
+                                                )
 
-                                            // Neighbor color hints for vertical spine blending.
-                                            let topFrom: Color? =
-                                                (i > 0)
-                                                ? vm.outputColor(
-                                                    for: plans[i - 1], now: now)
-                                                : nil
-                                            let bottomTo: Color? =
-                                                (i < plans.count - 1)
-                                                ? vm.outputColor(
-                                                    for: plans[i + 1], now: now)
-                                                : nil
+                                                .transition(.opacity)
+                                            }
 
-                                            TimelineSpineRow(
-                                                sp: sp,
-                                                isFirst: i == 0,
-                                                isLast: i == plans.count - 1,
-                                                // legacy param kept; unused in row
-                                                dayStart: window.start,
-                                                now: now,
-                                                showSpine: showSpine,
-                                                topFromColor: topFrom,
-                                                bottomToColor: bottomTo,
-                                                // NEW: visual-only edit mode sizing
-                                                isEditing: (mode == .edit),
-                                                editMinuteHeight:
-                                                    editMinuteHeight
-                                            )
-                                            .animation(
-                                                .easeInOut(duration: 0.28),
-                                                value: mode)
+                                            ForEach(plans.indices, id: \.self) {
+                                                i in
+                                                let sp = plans[i]
+                                                let topFrom: Color? =
+                                                    (i > 0)
+                                                    ? vm.outputColor(
+                                                        for: plans[i - 1],
+                                                        now: now) : nil
+                                                let bottomTo: Color? =
+                                                    (i < plans.count - 1)
+                                                    ? vm.outputColor(
+                                                        for: plans[i + 1],
+                                                        now: now) : nil
+
+                                                TimelineSpineRow(
+                                                    sp: sp,
+                                                    isFirst: i == 0,
+                                                    isLast: i == plans.count
+                                                        - 1,
+                                                    dayStart: window.start,  // legacy param kept; unused in row
+                                                    now: now,
+                                                    showSpine: showSpine,
+                                                    topFromColor: topFrom,
+                                                    bottomToColor: bottomTo,
+                                                    isEditing: (mode == .edit),
+                                                    editMinuteHeight:
+                                                        editMinuteHeight
+                                                )
+                                                .animation(
+                                                    .easeInOut(duration: 0.28),
+                                                    value: mode)
+                                            }
                                         }
+                                        .padding(.vertical, 8)
                                     }
-                                    .padding(.vertical, 8)
                                 }
+                                .scrollIndicators(.never)
+                                .animation(
+                                    .easeInOut(duration: 0.28), value: mode)
                             }
-                            .scrollIndicators(.never)
-                            .animation(.easeInOut(duration: 0.28), value: mode)
                         }
                     }
+
                 }
             } else {
                 ContentUnavailableView("Loading…", systemImage: "clock")
@@ -189,16 +209,14 @@ struct TodayTimelineView: View {
             }
             .pickerStyle(.segmented)
 
-            if mode == .view {
-                Picker("Spine", selection: $gutterMode) {
-                    ForEach(GutterMode.allCases, id: \.self) {
-                        Text($0.rawValue.capitalized)
-                    }
+            Picker("Spine", selection: $gutterMode) {
+                ForEach(GutterMode.allCases, id: \.self) {
+                    Text($0.rawValue.capitalized)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-                .transition(.opacity.combined(with: .scale))
             }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 320)
+            .transition(.opacity.combined(with: .scale))
 
             Spacer()
         }
@@ -224,61 +242,75 @@ struct TodayTimelineView: View {
 }
 
 /// A single, continuous 24-hour column of ticks and hour labels.
-/// - Drawn once (not per row) to avoid seams and keep alignment stable.
-/// - For this first step it's visual-only: we don't handle gestures yet.
+/// Uses a top inset = half of caption2 lineHeight so 0:00 isn't clipped,
+/// and increases total height by one full line to keep 24:00 visible.
 private struct HoursGridLayer: View {
     let minuteHeight: CGFloat
     let start: Date
 
-    private var hourCount: Int { 25 }  // 0...24 inclusive for the bottom label
+    // Expose the exact height the parent should use.
+    static func requiredHeight(minuteHeight: CGFloat) -> CGFloat {
+        let lh = UIFont.preferredFont(forTextStyle: .caption2).lineHeight
+        return (1440 * minuteHeight) + lh
+    }
+
+    private var hourCount: Int { 25 }  // 0…24 inclusive
+
+    // Layout constants
+    private let columnWidth: CGFloat = 56
+    private let labelWidth: CGFloat = 34
+    private let labelTickGap: CGFloat = 6
+    private let majorTickWidth: CGFloat = 12
+    private let minorTickWidth: CGFloat = 8
+
+    // Typography metrics
+    private var labelLineHeight: CGFloat {
+        UIFont.preferredFont(forTextStyle: .caption2).lineHeight
+    }
+    private var topInset: CGFloat { labelLineHeight / 2 }
+
+    // Centers to keep the left edge flush at x = 0
+    private var majorRowCenterX: CGFloat {
+        (labelWidth + labelTickGap + majorTickWidth) / 2
+    }
+    private var minorTickCenterX: CGFloat {
+        labelWidth + labelTickGap + (minorTickWidth / 2)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Column background (subtle to contrast with cards)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .frame(width: 56)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(
-                            Color(uiColor: .separator).opacity(0.3),
-                            lineWidth: 1)
-                )
-
-            // Tick marks + labels
+            // Major ticks + labels (every hour)
             ForEach(0..<hourCount, id: \.self) { h in
-                let y = CGFloat(h) * 60 * minuteHeight
-                HStack(spacing: 6) {
+                let y = topInset + CGFloat(h) * 60 * minuteHeight
+                HStack(spacing: labelTickGap) {
                     Text(formattedHour(h))
                         .font(.caption2)
-                        .frame(width: 34, alignment: .trailing)
-
+                        .frame(width: labelWidth, alignment: .trailing)
                     Rectangle()
                         .fill(Color(uiColor: .separator))
-                        .frame(width: 12, height: 1)
+                        .frame(width: majorTickWidth, height: 1)
                         .opacity(0.8)
                 }
-                .position(x: 28, y: y)  // center within 56pt column
+                .position(x: majorRowCenterX, y: y)
             }
 
-            // Minor ticks (every 15 min)
+            // Minor ticks (every 15 minutes)
             ForEach(0..<((hourCount - 1) * 3), id: \.self) { i in
-                let y = CGFloat(i + 1) * 15 * minuteHeight
+                let y = topInset + CGFloat(i + 1) * 15 * minuteHeight
                 Rectangle()
                     .fill(Color(uiColor: .separator).opacity(0.35))
-                    .frame(width: 8, height: 1)
-                    .position(x: 30, y: y)
+                    .frame(width: minorTickWidth, height: 1)
+                    .position(x: minorTickCenterX, y: y)
             }
         }
-        .padding(.leading, 8)  // slight breathing room from screen edge
-        .allowsHitTesting(false)  // visual-only for now
+        .frame(width: columnWidth, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 
-    private func formattedHour(_ h: Int) -> String {
-        let hour = h % 24
-        let comps = DateComponents(hour: hour, minute: 0)
+    private func formattedHour(_ offset: Int) -> String {
         let cal = Calendar.current
-        let date = cal.date(from: comps) ?? .now
-        return date.formatted(date: .omitted, time: .shortened)
+        let date = cal.date(byAdding: .hour, value: offset, to: start) ?? start
+        return date.formatted(
+            Date.FormatStyle(date: .omitted, time: .shortened))
     }
 }
