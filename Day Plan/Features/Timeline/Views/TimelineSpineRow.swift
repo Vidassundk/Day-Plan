@@ -166,14 +166,16 @@ struct TimelineSpineRow: View {
                 .padding(.leading, currentGutter)
                 .animation(
                     .easeInOut(duration: gutterAnimDuration),
-                    value: currentGutter)
+                    value: currentGutter
+                )
 
             spine
                 .frame(width: leftColumnWidth, alignment: .center)
                 .opacity(showSpine ? 1 : 0)
                 .offset(x: showSpine ? 0 : -8)
                 .animation(
-                    .easeInOut(duration: gutterAnimDuration), value: showSpine
+                    .easeInOut(duration: gutterAnimDuration),
+                    value: showSpine
                 )
                 .accessibilityHidden(!showSpine)
         }
@@ -221,7 +223,9 @@ struct TimelineSpineRow: View {
             .overlay(Capsule().stroke(nowBorder, lineWidth: 1))
             .shadow(
                 color: nowTagStyle == .solidTint
-                    ? planTint.opacity(0.25) : .clear, radius: 3, y: 1
+                    ? planTint.opacity(0.25) : .clear,
+                radius: 3,
+                y: 1
             )
             .accessibilityHidden(true)
     }
@@ -283,23 +287,32 @@ struct TimelineSpineRow: View {
                     if isFirst {
                         let g = LinearGradient(
                             colors: [Color.primary.opacity(0), .primary],
-                            startPoint: .top, endPoint: .center)
+                            startPoint: .top,
+                            endPoint: .center
+                        )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else {
                         vline(
-                            cx: cx, fromY: 0, toY: topEndY, style: Color.primary
+                            cx: cx,
+                            fromY: 0,
+                            toY: topEndY,
+                            style: Color.primary
                         )
                     }
                 case .current:
                     if isFirst {
                         let g = LinearGradient(
                             colors: [Color.primary.opacity(0), planTint],
-                            startPoint: .top, endPoint: .center)
+                            startPoint: .top,
+                            endPoint: .center
+                        )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else if let mid = topJunctionMid {
                         let g = LinearGradient(
-                            colors: [mid, planTint], startPoint: .top,
-                            endPoint: .bottom)
+                            colors: [mid, planTint],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     } else {
                         let from = topFromColor ?? .primary
@@ -310,8 +323,10 @@ struct TimelineSpineRow: View {
                         let endPt: UnitPoint =
                             neighborIsTint ? .bottom : .center
                         let g = LinearGradient(
-                            colors: [from, planTint], startPoint: startPt,
-                            endPoint: endPt)
+                            colors: [from, planTint],
+                            startPoint: startPt,
+                            endPoint: endPt
+                        )
                         vline(cx: cx, fromY: 0, toY: topEndY, style: g)
                     }
                 case .upcoming:
@@ -324,24 +339,37 @@ struct TimelineSpineRow: View {
                     if isLast {
                         let g = LinearGradient(
                             colors: [.primary, Color.primary.opacity(0)],
-                            startPoint: .center, endPoint: .bottom)
+                            startPoint: .center,
+                            endPoint: .bottom
+                        )
                         vline(
-                            cx: cx, fromY: bottomStartY - px, toY: h + px,
-                            style: g)
+                            cx: cx,
+                            fromY: bottomStartY - px,
+                            toY: h + px,
+                            style: g
+                        )
                     } else {
                         vline(
-                            cx: cx, fromY: bottomStartY - px, toY: h + px,
-                            style: Color.primary)
+                            cx: cx,
+                            fromY: bottomStartY - px,
+                            toY: h + px,
+                            style: Color.primary
+                        )
                     }
                 case .current:
                     if !isLast {
                         if let mid = bottomJunctionMid {
                             let g = LinearGradient(
-                                colors: [planTint, mid], startPoint: .top,
-                                endPoint: .bottom)
+                                colors: [planTint, mid],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                             vline(
-                                cx: cx, fromY: bottomStartY - px, toY: h + px,
-                                style: g)
+                                cx: cx,
+                                fromY: bottomStartY - px,
+                                toY: h + px,
+                                style: g
+                            )
                         } else {
                             let target = bottomToColor ?? separator
                             let neighborIsTint =
@@ -352,18 +380,26 @@ struct TimelineSpineRow: View {
                                 neighborIsTint
                                 ? UnitPoint(x: 0.5, y: 2.0) : .bottom
                             let g = LinearGradient(
-                                colors: [planTint, target], startPoint: startPt,
-                                endPoint: endPt)
+                                colors: [planTint, target],
+                                startPoint: startPt,
+                                endPoint: endPt
+                            )
                             vline(
-                                cx: cx, fromY: bottomStartY - px, toY: h + px,
-                                style: g)
+                                cx: cx,
+                                fromY: bottomStartY - px,
+                                toY: h + px,
+                                style: g
+                            )
                         }
                     }
                 case .upcoming:
                     if !isLast {
                         vline(
-                            cx: cx, fromY: bottomStartY, toY: h + px,
-                            style: separator)
+                            cx: cx,
+                            fromY: bottomStartY,
+                            toY: h + px,
+                            style: separator
+                        )
                     }
                 }
 
@@ -378,7 +414,9 @@ struct TimelineSpineRow: View {
                                 .overlay(
                                     Circle().stroke(
                                         Color(uiColor: .systemBackground)
-                                            .opacity(0.9), lineWidth: 2)
+                                            .opacity(0.9),
+                                        lineWidth: 2
+                                    )
                                 )
                                 .overlay {
                                     let side = dotDiameter - 2 * dotContentInset
@@ -387,14 +425,17 @@ struct TimelineSpineRow: View {
                                         .lineLimit(1)
                                         .minimumScaleFactor(0.5)
                                         .frame(
-                                            width: side, height: side,
+                                            width: side,
+                                            height: side,
                                             alignment: .center
                                         )
                                         .offset(y: emojiBaselineNudge)
                                         .accessibilityHidden(true)
                                 }
                                 .shadow(
-                                    radius: status == .current ? 2 : 0, y: 1)
+                                    radius: status == .current ? 2 : 0,
+                                    y: 1
+                                )
                         case .squircle:
                             RoundedRectangle(
                                 cornerRadius: dotCornerRadius,
@@ -409,7 +450,10 @@ struct TimelineSpineRow: View {
                                 )
                                 .stroke(
                                     Color(uiColor: .systemBackground).opacity(
-                                        0.9), lineWidth: 0)
+                                        0.9
+                                    ),
+                                    lineWidth: 0
+                                )
                             )
                             .overlay {
                                 let side = dotDiameter - 2 * dotContentInset
@@ -418,7 +462,8 @@ struct TimelineSpineRow: View {
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.5)
                                     .frame(
-                                        width: side, height: side,
+                                        width: side,
+                                        height: side,
                                         alignment: .center
                                     )
                                     .offset(y: emojiBaselineNudge)
@@ -439,7 +484,10 @@ struct TimelineSpineRow: View {
     // MARK: Helpers
 
     private func vline<S: ShapeStyle>(
-        cx: CGFloat, fromY: CGFloat, toY: CGFloat, style: S
+        cx: CGFloat,
+        fromY: CGFloat,
+        toY: CGFloat,
+        style: S
     ) -> some View {
         Path { p in
             p.move(to: CGPoint(x: cx, y: fromY))
@@ -487,7 +535,9 @@ struct TimelineGapRow: View {
     private var keepGutterSpace: Bool { isEditing || showSpine }
 
     init(
-        minutesUntil: Int, showSpine: Bool, isEditing: Bool,
+        minutesUntil: Int,
+        showSpine: Bool,
+        isEditing: Bool,
         kind: TimelineGapKind = .between
     ) {
         self.minutesUntil = minutesUntil
@@ -502,14 +552,16 @@ struct TimelineGapRow: View {
                 .padding(.leading, currentGutter)
                 .animation(
                     .easeInOut(duration: gutterAnimDuration),
-                    value: currentGutter)
+                    value: currentGutter
+                )
 
             spine
                 .frame(width: leftColumnWidth, alignment: .center)
                 .opacity(showSpine ? 1 : 0)
                 .offset(x: showSpine ? 0 : -8)
                 .animation(
-                    .easeInOut(duration: gutterAnimDuration), value: showSpine
+                    .easeInOut(duration: gutterAnimDuration),
+                    value: showSpine
                 )
                 .accessibilityHidden(!showSpine)
         }
@@ -551,14 +603,16 @@ struct TimelineGapRow: View {
                 }
                 .stroke(
                     separator,
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
+                )
 
                 let fadePrimary = LinearGradient(
                     gradient: Gradient(stops: [
                         .init(color: .primary, location: 0.0),
                         .init(color: .primary.opacity(0), location: 1.0),
                     ]),
-                    startPoint: .top, endPoint: .bottom
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
                 Path { p in
                     p.move(to: CGPoint(x: cx, y: 0))
@@ -566,7 +620,8 @@ struct TimelineGapRow: View {
                 }
                 .stroke(
                     fadePrimary,
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
+                )
 
             case .beforeFirst:
                 let fadeSeparatorIn = LinearGradient(
@@ -574,7 +629,8 @@ struct TimelineGapRow: View {
                         .init(color: separator.opacity(0), location: 0.0),
                         .init(color: separator, location: 1.0),
                     ]),
-                    startPoint: .top, endPoint: .bottom
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
                 Path { p in
                     p.move(to: CGPoint(x: cx, y: 0))
@@ -582,7 +638,8 @@ struct TimelineGapRow: View {
                 }
                 .stroke(
                     fadeSeparatorIn,
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt)
+                )
             }
         }
         .allowsHitTesting(false)

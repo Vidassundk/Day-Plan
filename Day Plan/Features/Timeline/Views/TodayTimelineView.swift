@@ -15,14 +15,8 @@ struct TodayTimelineView: View {
         case view = "View"
         case edit = "Edit"
     }
-    private enum GutterMode: String, CaseIterable {
-        case auto = "Auto"
-        case show = "Show"
-        case hide = "Hide"
-    }
 
     @State private var mode: Mode = .view
-    @State private var gutterMode: GutterMode = .auto
 
     private let tick: TimeInterval = 1
     private let editMinuteHeight: CGFloat = 1.4
@@ -41,10 +35,10 @@ struct TodayTimelineView: View {
         TimelineView(.periodic(from: .now, by: tick)) { timeline in
             let now = timeline.date
             let plans = scheduled
-            let showSpine = spineVisible(now: now, plans: plans)
+            let showSpine = (mode == .view)
 
             VStack(alignment: .leading, spacing: 12) {
-                header(now: now)
+                header()
 
                 ZStack(alignment: .topLeading) {
                     if mode == .edit {
@@ -146,7 +140,7 @@ struct TodayTimelineView: View {
     // MARK: - Header
 
     @ViewBuilder
-    private func header(now: Date) -> some View {
+    private func header() -> some View {
         HStack(spacing: 12) {
             Picker("", selection: $mode) {
                 ForEach(Mode.allCases, id: \.self) { m in
@@ -155,31 +149,9 @@ struct TodayTimelineView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 260)
-
-            Picker("", selection: $gutterMode) {
-                ForEach(GutterMode.allCases, id: \.self) { g in
-                    Text(g.rawValue).tag(g)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 300)
-            .disabled(mode == .edit)
-            .opacity(mode == .edit ? 0.5 : 1)
         }
     }
 
-    // MARK: - Policy
-
-    private func spineVisible(now: Date, plans: [ScheduledPlan]) -> Bool {
-        if mode == .edit { return false }
-        switch gutterMode {
-        case .show: return true
-        case .hide: return false
-        case .auto:
-            guard let lastEnd = plans.map(\.endTime).max() else { return false }
-            return now <= lastEnd
-        }
-    }
 
     // MARK: - Time helpers
 
@@ -211,53 +183,51 @@ private struct HoursGridLayer: View {
 
     private var hourCount: Int { 25 }  // 0…24 inclusive
 
-    private let columnWidth: CGFloat = 56
     private let labelWidth: CGFloat = 34
     private let labelTickGap: CGFloat = 6
-    private let majorTickWidth: CGFloat = 12
-    private let minorTickWidth: CGFloat = 8
 
     private var labelLineHeight: CGFloat {
         UIFont.preferredFont(forTextStyle: .caption2).lineHeight
     }
     private var topInsetLocal: CGFloat { Self.topInset }
 
-    // Centers chosen so the left edge sits at x = 0.
-    private var majorRowCenterX: CGFloat {
-        (labelWidth + labelTickGap + majorTickWidth) / 2
-    }
-    private var minorTickCenterX: CGFloat {
-        labelWidth + labelTickGap + (minorTickWidth / 2)
-    }
-
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            // Hour labels + major ticks
-            ForEach(0..<hourCount, id: \.self) { h in
-                let y = topInsetLocal + CGFloat(h) * 60 * minuteHeight
-                HStack(spacing: labelTickGap) {
+        GeometryReader { geo in
+            let lineStartX = labelWidth + labelTickGap
+
+            ZStack(alignment: .topLeading) {
+                // Major hour lines across the full width (start after the label)
+                ForEach(0..<hourCount, id: \.self) { h in
+                    let y = topInsetLocal + CGFloat(h) * 60 * minuteHeight
+                    Path { p in
+                        p.move(to: CGPoint(x: lineStartX, y: y))
+                        p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                    .stroke(Color(uiColor: .separator).opacity(0.8), lineWidth: 1)
+                }
+
+                // Minor 15-minute lines across the full width
+                ForEach(0..<((hourCount - 1) * 3), id: \.self) { i in
+                    let y = topInsetLocal + CGFloat(i + 1) * 15 * minuteHeight
+                    Path { p in
+                        p.move(to: CGPoint(x: lineStartX, y: y))
+                        p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                    .stroke(Color(uiColor: .separator).opacity(0.35), lineWidth: 1)
+                }
+
+                // Hour labels flush-left, aligned with the start of the lines
+                ForEach(0..<hourCount, id: \.self) { h in
+                    let y = topInsetLocal + CGFloat(h) * 60 * minuteHeight
                     Text(formattedHour(h))
                         .font(.caption2)
                         .frame(width: labelWidth, alignment: .trailing)
-                    Rectangle()
-                        .fill(Color(uiColor: .separator))
-                        .frame(width: majorTickWidth, height: 1)
-                        .opacity(0.8)
+                        .position(x: labelWidth / 2, y: y)
                 }
-                .position(x: majorRowCenterX, y: y)
             }
-
-            // Minor ticks every 15 minutes
-            ForEach(0..<((hourCount - 1) * 3), id: \.self) { i in
-                let y = topInsetLocal + CGFloat(i + 1) * 15 * minuteHeight
-                Rectangle()
-                    .fill(Color(uiColor: .separator).opacity(0.35))
-                    .frame(width: minorTickWidth, height: 1)
-                    .position(x: minorTickCenterX, y: y)
-            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .allowsHitTesting(false)
         }
-        .frame(width: columnWidth, alignment: .topLeading)
-        .allowsHitTesting(false)
     }
 
     private func formattedHour(_ offset: Int) -> String {
