@@ -48,7 +48,9 @@ struct TodayTimelineView: View {
                         )
                         .frame(
                             height: HoursGridLayer.requiredHeight(
-                                minuteHeight: editMinuteHeight))
+                                minuteHeight: editMinuteHeight
+                            )
+                        )
                     }
 
                     ScrollView(.vertical) {
@@ -59,7 +61,10 @@ struct TodayTimelineView: View {
                                     0,
                                     Int(
                                         first.startTime.timeIntervalSince(
-                                            startOfDay(now)) / 60))
+                                            startOfDay(now)
+                                        ) / 60
+                                    )
+                                )
                                 if lead > 0 {
                                     Color.clear.frame(
                                         height: CGFloat(lead) * editMinuteHeight
@@ -72,7 +77,9 @@ struct TodayTimelineView: View {
                                     0,
                                     Int(
                                         first.startTime.timeIntervalSince(now)
-                                            / 60))
+                                            / 60
+                                    )
+                                )
                                 TimelineGapRow(
                                     minutesUntil: minsLeft,
                                     showSpine: showSpine,
@@ -91,11 +98,40 @@ struct TodayTimelineView: View {
                                         0,
                                         Int(
                                             sp.startTime.timeIntervalSince(
-                                                prev.endTime) / 60))
+                                                prev.endTime
+                                            ) / 60
+                                        )
+                                    )
                                     if gap > 0 {
                                         Color.clear.frame(
                                             height: CGFloat(gap)
-                                                * editMinuteHeight)
+                                                * editMinuteHeight
+                                        )
+                                    }
+                                }
+
+                                // ⬇️ INSERT the new View-mode block here ⬇️
+                                // View mode: if "now" falls between the previous plan's end and this plan's start,
+                                // show the "until next plan" row.
+                                if mode == .view, i > 0 {
+                                    let prev = plans[i - 1]
+                                    if now >= prev.endTime && now < sp.startTime
+                                    {
+                                        let minsLeft = max(
+                                            0,
+                                            Int(
+                                                sp.startTime.timeIntervalSince(
+                                                    now
+                                                ) / 60
+                                            )
+                                        )
+                                        TimelineGapRow(
+                                            minutesUntil: minsLeft,
+                                            showSpine: showSpine,
+                                            isEditing: false,
+                                            kind: .between
+                                        )
+                                        .transition(.opacity)
                                     }
                                 }
 
@@ -117,7 +153,10 @@ struct TodayTimelineView: View {
                                     0,
                                     Int(
                                         endOfDay(now).timeIntervalSince(
-                                            last.endTime) / 60))
+                                            last.endTime
+                                        ) / 60
+                                    )
+                                )
                                 if tail > 0 {
                                     Color.clear.frame(
                                         height: CGFloat(tail) * editMinuteHeight
@@ -126,7 +165,8 @@ struct TodayTimelineView: View {
                             }
                         }
                         .padding(
-                            .top, mode == .edit ? HoursGridLayer.topInset : 0
+                            .top,
+                            mode == .edit ? HoursGridLayer.topInset : 0
                         )
                         .padding(.vertical, mode == .edit ? 0 : 8)
                     }
@@ -151,7 +191,6 @@ struct TodayTimelineView: View {
             .frame(maxWidth: 260)
         }
     }
-
 
     // MARK: - Time helpers
 
@@ -203,7 +242,10 @@ private struct HoursGridLayer: View {
                         p.move(to: CGPoint(x: lineStartX, y: y))
                         p.addLine(to: CGPoint(x: geo.size.width, y: y))
                     }
-                    .stroke(Color(uiColor: .separator).opacity(0.8), lineWidth: 1)
+                    .stroke(
+                        Color(uiColor: .separator).opacity(0.8),
+                        lineWidth: 1
+                    )
                 }
 
                 // Minor 15-minute lines across the full width
@@ -213,7 +255,10 @@ private struct HoursGridLayer: View {
                         p.move(to: CGPoint(x: lineStartX, y: y))
                         p.addLine(to: CGPoint(x: geo.size.width, y: y))
                     }
-                    .stroke(Color(uiColor: .separator).opacity(0.35), lineWidth: 1)
+                    .stroke(
+                        Color(uiColor: .separator).opacity(0.35),
+                        lineWidth: 1
+                    )
                 }
 
                 // Hour labels flush-left, aligned with the start of the lines
@@ -235,6 +280,7 @@ private struct HoursGridLayer: View {
             Calendar.current.date(byAdding: .hour, value: offset, to: start)
             ?? start
         return date.formatted(
-            Date.FormatStyle(date: .omitted, time: .shortened))
+            Date.FormatStyle(date: .omitted, time: .shortened)
+        )
     }
 }
