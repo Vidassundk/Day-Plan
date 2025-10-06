@@ -84,26 +84,8 @@ struct TimelineSpineRow: View {
     private var totalGutter: CGFloat { leftColumnWidth + gapWidth }
     private var keepGutterSpace: Bool { isEditing || showSpine }
 
-    // MARK: Card size bands (view mode “pleasant” heights)
-    private enum CardSizeBand: Int, CaseIterable { case xs, s, m, l, xl }
-    private func band(for minutes: Int) -> CardSizeBand {
-        switch minutes {
-        case ..<31: return .xs
-        case ..<61: return .s
-        case ..<121: return .m
-        case ..<181: return .l
-        default: return .xl
-        }
-    }
-    private func minHeight(for band: CardSizeBand) -> CGFloat {
-        switch band {
-        case .xs: return 56
-        case .s: return 72
-        case .m: return 92
-        case .l: return 116
-        case .xl: return 140
-        }
-    }
+    // MARK: View mode height (no size banding)
+    private let viewModeHeight: CGFloat = 82
 
     // MARK: Derived (via VM + local mapping)
     private var start: Date { sp.startTime }
@@ -112,15 +94,13 @@ struct TimelineSpineRow: View {
     private var liveProgress: Double { vm.liveProgress(now: now) }
 
     private var durationMinutes: Int { max(0, Int(sp.duration / 60)) }
-    private var sizeBand: CardSizeBand { band(for: durationMinutes) }
-    private var bandedMinHeight: CGFloat { minHeight(for: sizeBand) }
 
-    /// Exact visual height for Edit; banded face height for View.
+    /// Exact visual height for Edit; fixed face height for View.
     private var editExactHeight: CGFloat {
         CGFloat(durationMinutes) * editMinuteHeight
     }
     private var cardHeight: CGFloat {
-        isEditing ? editExactHeight : bandedMinHeight
+        isEditing ? editExactHeight : viewModeHeight
     }
 
     // MARK: Anim state

@@ -19,7 +19,7 @@ struct TodayTimelineView: View {
     @State private var mode: Mode = .view
 
     private let tick: TimeInterval = 1
-    private let editMinuteHeight: CGFloat = 1.4
+    private let editMinuteHeight: CGFloat = 0.9
 
     init(templateID: UUID) {
         self.templateID = templateID
