@@ -12,9 +12,24 @@ enum TimelineStyle {
     static let viewModeRowHeight: CGFloat = 82
     static let cardVerticalPadView: CGFloat = 8
 
-    // Animations
-    static let spineFadeDuration: Double = 0.22
-    static let cardRepositionDuration: Double = 0.38
+    // --- Debug slow-motion (toggleable) ---
+    /// Enable to slow down all timeline animations for debugging.
+    static var debugSlowMoEnabled: Bool = true
+    /// Multiplier applied to animation durations when slow-mo is enabled.
+    static var slowMoFactor: Double = 6.0
+
+    /// Scales a duration by the slow-mo factor when slow-mo is enabled.
+    static func scaled(_ d: Double) -> Double {
+        debugSlowMoEnabled ? (d * slowMoFactor) : d
+    }
+
+    // Animations (centralized)
+    static var spineFadeDuration: Double { scaled(0.22) }
+    static var cardRepositionDuration: Double { scaled(0.38) }
+    static var gutterAnimationDuration: Double { scaled(0.32) }
+    static var gutterCollapseDelay: Double { scaled(0.34) }
+    static var progressAnimDuration: Double { scaled(0.60) }
+    static func generic(_ base: Double) -> Double { scaled(base) }
 
     // Edit scale (px/min)
     static let editMinuteHeight: CGFloat = 0.9

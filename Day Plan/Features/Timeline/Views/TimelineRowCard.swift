@@ -107,7 +107,7 @@ struct TimelineCardOnlyRow: View {
         .opacity(status == .past ? 0.6 : 1)
         .padding(.vertical, isEditing ? 0 : TimelineStyle.cardVerticalPadView)
         .padding(.leading, currentGutter)
-        .animation(.easeInOut(duration: 0.32), value: currentGutter)
+        .animation(.easeInOut(duration: TimelineStyle.gutterAnimationDuration), value: currentGutter)
         .animation(repositionAnimation, value: isEditing)
         .onAppear {
             currentGutter = keepGutterSpace ? totalGutter : 0
@@ -117,17 +117,17 @@ struct TimelineCardOnlyRow: View {
             if isCollapsing {
                 displayedProgress = new
             } else {
-                withAnimation(.linear(duration: 0.6)) {
+                withAnimation(.linear(duration: TimelineStyle.progressAnimDuration)) {
                     displayedProgress = new
                 }
             }
         }
         .onChange(of: reserveGutter) { _ in
             isCollapsing = true
-            withAnimation(.easeInOut(duration: 0.32)) {
+            withAnimation(.easeInOut(duration: TimelineStyle.gutterAnimationDuration)) {
                 currentGutter = keepGutterSpace ? totalGutter : 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + TimelineStyle.gutterCollapseDelay) {
                 isCollapsing = false
             }
         }
@@ -137,8 +137,8 @@ struct TimelineCardOnlyRow: View {
 
     private var repositionAnimation: Animation {
         isEditing
-            ? .easeInOut(duration: TimelineStyle.cardRepositionDuration)  // start instantly on View→Edit
-            : .easeInOut(duration: 0.28)
+            ? .easeInOut(duration: TimelineStyle.cardRepositionDuration)
+            : .easeInOut(duration: TimelineStyle.generic(0.28))
     }
 
     private var accessibilityText: Text {
