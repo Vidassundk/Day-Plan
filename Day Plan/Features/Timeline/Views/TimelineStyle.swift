@@ -14,7 +14,7 @@ enum TimelineStyle {
 
     // --- Debug slow-motion (toggleable) ---
     /// Enable to slow down all timeline animations for debugging.
-    static var debugSlowMoEnabled: Bool = true
+    static var debugSlowMoEnabled: Bool = false
     /// Multiplier applied to animation durations when slow-mo is enabled.
     static var slowMoFactor: Double = 6.0
 
@@ -24,11 +24,11 @@ enum TimelineStyle {
     }
 
     // Animations (centralized)
-    static var spineFadeDuration: Double { scaled(0.22) }
-    static var cardRepositionDuration: Double { scaled(0.38) }
-    static var gutterAnimationDuration: Double { scaled(0.32) }
-    static var gutterCollapseDelay: Double { scaled(0.34) }
-    static var progressAnimDuration: Double { scaled(0.60) }
+    static var spineFadeDuration: Double { scaled(0.7) }
+    static var cardRepositionDuration: Double { scaled(1) }
+    static var gutterAnimationDuration: Double { scaled(1) }
+    static var gutterCollapseDelay: Double { scaled(1) }
+    static var progressAnimDuration: Double { scaled(1) }
     static func generic(_ base: Double) -> Double { scaled(base) }
 
     // Edit scale (px/min)

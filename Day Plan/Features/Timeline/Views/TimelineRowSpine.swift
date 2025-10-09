@@ -204,7 +204,6 @@ struct TimelineSpineOnlyRow: View {
         let dir: CGFloat = (TimelineStyle.spineHideDirection == .left) ? -1 : 1
         return dir * TimelineStyle.hideSlideDistance
     }
-
     private func vline<S: ShapeStyle>(
         cx: CGFloat,
         fromY: CGFloat,

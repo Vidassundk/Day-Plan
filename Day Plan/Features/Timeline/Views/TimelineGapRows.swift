@@ -21,6 +21,12 @@ struct TimelineGapCardRow: View {
         TimelineStyle.leftColumnWidth + TimelineStyle.gapWidth
     }
 
+    /// Horizontal slide to match spine’s hide/show behavior.
+    private var slideX: CGFloat {
+        let dir: CGFloat = (TimelineStyle.spineHideDirection == .left) ? -1 : 1
+        return showSpine ? 0 : dir * TimelineStyle.hideSlideDistance
+    }
+
     var body: some View {
         Text("\(TimeUtil.formatMinutes(minutesUntil)) until next plan")
             .font(.footnote.weight(.bold))
@@ -40,8 +46,9 @@ struct TimelineGapCardRow: View {
                     currentGutter = reserveGutter ? totalGutter : 0
                 }
             }
-            // Fade in/out in sync with the spine
+            // Fade + slide in sync with the spine
             .opacity(showSpine ? 1 : 0)
+            .offset(x: slideX)
             .animation(
                 .easeInOut(duration: TimelineStyle.spineFadeDuration),
                 value: showSpine

@@ -49,7 +49,7 @@ struct HoursGridLayer: View {
                     let y = topInsetLocal + CGFloat(h) * 60 * minuteHeight
                     Path { p in
                         p.move(to: CGPoint(x: lineStartX, y: y))
-                        p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                        p.addLine(to: CGPoint(x: geo.size.width, y: y))  // <- token fix here
                     }
                     .stroke(
                         Color(uiColor: .separator).opacity(0.8),

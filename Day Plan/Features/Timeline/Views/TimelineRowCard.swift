@@ -69,6 +69,7 @@ struct TimelineCardOnlyRow: View {
                 Text(vm.timeRangeString())
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .opacity(isEditing ? 0 : 1)
 
                 if status == .current {
                     ProgressView(value: displayedProgress)
@@ -79,6 +80,8 @@ struct TimelineCardOnlyRow: View {
                             value: displayedProgress
                         )
                         .blur(radius: isCollapsing ? 1.2 : 0)
+                        .opacity(isEditing ? 0 : 1)
+
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,10 +98,13 @@ struct TimelineCardOnlyRow: View {
                         Capsule().stroke(planTint.opacity(0.35), lineWidth: 1)
                     )
                     .shadow(color: planTint.opacity(0.25), radius: 3, y: 1)
+                    .opacity(isEditing ? 0 : 1)
+
                     .accessibilityHidden(true)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .frame(height: cardHeight, alignment: .top)
         .background(
             Color(uiColor: .secondarySystemGroupedBackground),
@@ -107,7 +113,10 @@ struct TimelineCardOnlyRow: View {
         .opacity(status == .past ? 0.6 : 1)
         .padding(.vertical, isEditing ? 0 : TimelineStyle.cardVerticalPadView)
         .padding(.leading, currentGutter)
-        .animation(.easeInOut(duration: TimelineStyle.gutterAnimationDuration), value: currentGutter)
+        .animation(
+            .easeInOut(duration: TimelineStyle.gutterAnimationDuration),
+            value: currentGutter
+        )
         .animation(repositionAnimation, value: isEditing)
         .onAppear {
             currentGutter = keepGutterSpace ? totalGutter : 0
@@ -117,17 +126,23 @@ struct TimelineCardOnlyRow: View {
             if isCollapsing {
                 displayedProgress = new
             } else {
-                withAnimation(.linear(duration: TimelineStyle.progressAnimDuration)) {
+                withAnimation(
+                    .linear(duration: TimelineStyle.progressAnimDuration)
+                ) {
                     displayedProgress = new
                 }
             }
         }
         .onChange(of: reserveGutter) { _ in
             isCollapsing = true
-            withAnimation(.easeInOut(duration: TimelineStyle.gutterAnimationDuration)) {
+            withAnimation(
+                .easeInOut(duration: TimelineStyle.gutterAnimationDuration)
+            ) {
                 currentGutter = keepGutterSpace ? totalGutter : 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + TimelineStyle.gutterCollapseDelay) {
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + TimelineStyle.gutterCollapseDelay
+            ) {
                 isCollapsing = false
             }
         }

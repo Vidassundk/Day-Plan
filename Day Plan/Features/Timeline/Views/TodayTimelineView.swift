@@ -48,28 +48,34 @@ struct TodayTimelineView: View {
                 header()
 
                 ZStack(alignment: .topLeading) {
+                    // Grid is ALWAYS mounted; we just fade/slide it opposite the spine.
                     HourGrid(
-                        isEditing: isEditing,
-                        keepFrame: keepGridFrameDuringCollapse,
+                        showSpine: showSpine,
                         startOfDay: startDay,
                         minuteHeight: editMinuteHeight
                     )
 
                     ScrollView(.vertical) {
                         ZStack(alignment: .topLeading) {
+                            // Left column: spines and GAP TEXT overlay (fixed view-mode geometry)
                             SpineLayer(
                                 now: now,
                                 plans: plans,
                                 showSpine: showSpine
                             )
+                            GapTextSpineLayer(
+                                now: now,
+                                plans: plans,
+                                showSpine: showSpine
+                            )
 
+                            // Right column: cards + in-flow (textless) gap rows for spacing
                             CardsLayer(
                                 now: now,
                                 plans: plans,
                                 isEditing: isEditing,
-                                showSpine: showSpine,
                                 startOfDay: startDay,
-                                endOfDay: endDay,
+                                endDay: endDay,
                                 minuteHeight: editMinuteHeight
                             )
                         }
@@ -81,7 +87,8 @@ struct TodayTimelineView: View {
             }
             .onChange(of: mode) { newMode in
                 if newMode == .view {
-                    // Lock the grid frame so container height doesn't snap shorter immediately.
+                    // This can remain (harmless) for container-height stability;
+                    // the grid is now always mounted so there’s no visual blink.
                     keepGridFrameDuringCollapse = true
                     DispatchQueue.main.asyncAfter(
                         deadline: .now() + TimelineStyle.cardRepositionDuration
@@ -90,7 +97,7 @@ struct TodayTimelineView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+
         }
     }
 
@@ -111,41 +118,47 @@ struct TodayTimelineView: View {
 
     // MARK: - Helper Layers (split to keep type-checker happy)
 
+    /// Grid is always mounted; it fades/slides opposite to the spine.
     @ViewBuilder
     private func HourGrid(
-        isEditing: Bool,
-        keepFrame: Bool,
+        showSpine: Bool,
         startOfDay: Date,
         minuteHeight: CGFloat
     ) -> some View {
-        if isEditing || keepFrame {
-            HoursGridLayer(minuteHeight: minuteHeight, start: startOfDay)
-                .frame(
-                    height: HoursGridLayer.requiredHeight(
-                        minuteHeight: minuteHeight
-                    )
+        // Counter-slide relative to the spine
+        let hide = TimelineStyle.hideSlideDistance
+        let dir: CGFloat = (TimelineStyle.spineHideDirection == .left) ? -1 : 1
+        let spineHideOffset = dir * hide  // where the spine goes when it hides
+        let gridHiddenOffset = -spineHideOffset  // opposite direction for the grid
+
+        HoursGridLayer(minuteHeight: minuteHeight, start: startOfDay)
+            .frame(
+                height: HoursGridLayer.requiredHeight(
+                    minuteHeight: minuteHeight
                 )
-                .opacity(isEditing ? 1 : 0)  // keep frame, hide visuals when collapsing
-                .allowsHitTesting(false)
-        }
+            )
+            .opacity(showSpine ? 0 : 1)  // inverse of spine
+            .offset(x: showSpine ? gridHiddenOffset : 0)  // slide opposite direction
+            .animation(
+                .easeInOut(duration: TimelineStyle.spineFadeDuration),
+                value: showSpine
+            )
+            .allowsHitTesting(false)
     }
 
+    /// Left-side spines (fixed view-mode geometry).
     @ViewBuilder
-    private func SpineLayer(
-        now: Date,
-        plans: [ScheduledPlan],
-        showSpine: Bool
-    ) -> some View {
+    private func SpineLayer(now: Date, plans: [ScheduledPlan], showSpine: Bool)
+        -> some View
+    {
         VStack(alignment: .leading, spacing: 0) {
             if let first = plans.first, now < first.startTime {
-                // Gap at the very top
                 TimelineGapSpineRow(kind: .beforeFirst, showSpine: showSpine)
             }
 
             ForEach(plans.indices, id: \.self) { i in
                 let sp = plans[i]
 
-                // Gap between previous and current
                 if i > 0 {
                     let prev = plans[i - 1]
                     if now >= prev.endTime && now < sp.startTime {
@@ -156,7 +169,6 @@ struct TodayTimelineView: View {
                     }
                 }
 
-                // Main spine segment for this plan
                 TimelineSpineOnlyRow(
                     sp: sp,
                     isFirst: i == 0,
@@ -170,14 +182,82 @@ struct TodayTimelineView: View {
         }
     }
 
+    /// Left-side *gap text* overlay that follows the same fixed view-mode stacking as the spine.
+    @ViewBuilder
+    private func GapTextSpineLayer(
+        now: Date,
+        plans: [ScheduledPlan],
+        showSpine: Bool
+    ) -> some View {
+        let rowHeight =
+            TimelineStyle.viewModeRowHeight
+            + (TimelineStyle.cardVerticalPadView * 2)
+        VStack(alignment: .leading, spacing: 0) {
+            // Before-first gap label
+            if let first = plans.first, now < first.startTime {
+                let minsLeft = max(
+                    0,
+                    Int(first.startTime.timeIntervalSince(now) / 60)
+                )
+                TimelineGapCardRow(
+                    minutesUntil: minsLeft,
+                    isEditing: false,
+                    reserveGutter: true,
+                    showSpine: showSpine
+                )
+                .opacity(showSpine ? 1 : 0)
+                .animation(
+                    .easeInOut(duration: TimelineStyle.spineFadeDuration),
+                    value: showSpine
+                )
+                .transition(.opacity)
+            }
+
+            // For each plan: optional between-gap label + fixed-height spacer matching the spine row
+            ForEach(plans.indices, id: \.self) { i in
+                let sp = plans[i]
+                if i > 0 {
+                    let prev = plans[i - 1]
+                    if now >= prev.endTime && now < sp.startTime {
+                        let minsLeft = max(
+                            0,
+                            Int(sp.startTime.timeIntervalSince(now) / 60)
+                        )
+                        TimelineGapCardRow(
+                            minutesUntil: minsLeft,
+                            isEditing: false,
+                            reserveGutter: true,
+                            showSpine: showSpine
+                        )
+                        .opacity(showSpine ? 1 : 0)
+                        .animation(
+                            .easeInOut(
+                                duration: TimelineStyle.spineFadeDuration
+                            ),
+                            value: showSpine
+                        )
+                        .transition(.opacity)
+                    }
+                }
+
+                // Advance the vertical stacking by the fixed view-mode row height (spine never stretches)
+                Color.clear.frame(height: rowHeight)
+            }
+        }
+        // Ensure this overlay spans full width so the text sits to the right of the spine (via reserveGutter)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Right-side cards + in-flow "textless" gap rows — only for spacing in View.
     @ViewBuilder
     private func CardsLayer(
         now: Date,
         plans: [ScheduledPlan],
         isEditing: Bool,
-        showSpine: Bool,
         startOfDay: Date,
-        endOfDay: Date,
+        endDay: Date,
         minuteHeight: CGFloat
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -187,11 +267,7 @@ struct TodayTimelineView: View {
                     0,
                     Int(first.startTime.timeIntervalSince(startOfDay) / 60)
                 )
-                let showFirstGapLabel = (!isEditing && now < first.startTime)
-                let firstGapMinutes = max(
-                    0,
-                    Int(first.startTime.timeIntervalSince(now) / 60)
-                )
+                let showFirstGapRow = (!isEditing && now < first.startTime)
 
                 AnimHeightSpacer(
                     height: isEditing ? CGFloat(lead) * minuteHeight : 0,
@@ -199,13 +275,9 @@ struct TodayTimelineView: View {
                     delay: 0,
                     duration: TimelineStyle.cardRepositionDuration
                 )
-                // In-flow label row so it reserves space (not overlay)
-                GapLabelRow(
-                    show: showFirstGapLabel,
-                    minutes: firstGapMinutes,
-                    showSpine: showSpine,
-                    reserveGutter: isEditing || showSpine
-                )
+
+                // Reserve space in View, but do NOT render visible text (overlay handles it)
+                GapSpaceRow(show: showFirstGapRow)
             }
 
             // Plans + gaps
@@ -218,28 +290,20 @@ struct TodayTimelineView: View {
                         0,
                         Int(sp.startTime.timeIntervalSince(prev.endTime) / 60)
                     )
-                    let showBetweenGapLabel =
+                    let showBetweenGapRow =
                         (!isEditing && now >= prev.endTime
                             && now < sp.startTime)
-                    let betweenGapMinutes = max(
-                        0,
-                        Int(sp.startTime.timeIntervalSince(now) / 60)
-                    )
 
-                    // Spacer representing the time gap
+                    // Spacer representing the time gap (Edit only)
                     AnimHeightSpacer(
                         height: isEditing ? CGFloat(gap) * minuteHeight : 0,
                         animate: isEditing,
                         delay: 0,
                         duration: TimelineStyle.cardRepositionDuration
                     )
-                    // In-flow label row so it reserves space (not overlay)
-                    GapLabelRow(
-                        show: showBetweenGapLabel,
-                        minutes: betweenGapMinutes,
-                        showSpine: showSpine,
-                        reserveGutter: isEditing || showSpine
-                    )
+
+                    // Reserve space in View, but do NOT render visible text (overlay handles it)
+                    GapSpaceRow(show: showBetweenGapRow)
                 }
 
                 // The actual plan card
@@ -250,7 +314,7 @@ struct TodayTimelineView: View {
                     now: now,
                     isEditing: isEditing,
                     editMinuteHeight: minuteHeight,
-                    reserveGutter: isEditing || showSpine
+                    reserveGutter: isEditing || (mode == .view)
                 )
             }
 
@@ -258,7 +322,7 @@ struct TodayTimelineView: View {
             if let last = plans.last {
                 let tail = max(
                     0,
-                    Int(endOfDay.timeIntervalSince(last.endTime) / 60)
+                    Int(endDay.timeIntervalSince(last.endTime) / 60)
                 )
                 AnimHeightSpacer(
                     height: isEditing ? CGFloat(tail) * minuteHeight : 0,
@@ -270,45 +334,17 @@ struct TodayTimelineView: View {
         }
     }
 
-    // Mounted, in-flow label row:
-    // - Reserves space (height)
-    // - Fades quickly with the spine
-    // - Slides left in sync with the spine so you don't see it traveling down
+    /// In-flow spacing row with no visible text (keeps vertical rhythm in View).
     @ViewBuilder
-    private func GapLabelRow(
-        show: Bool,
-        minutes: Int,
-        showSpine: Bool,
-        reserveGutter: Bool
-    ) -> some View {
-        let rowHeight: CGFloat = 26  // match TimelineGapSpineRow height
-        let dir: CGFloat = (TimelineStyle.spineHideDirection == .left) ? -1 : 1
-        let offsetX: CGFloat =
-            showSpine ? 0 : dir * TimelineStyle.hideSlideDistance
-
-        TimelineGapCardRow(
-            minutesUntil: minutes,
-            isEditing: false,
-            reserveGutter: reserveGutter,
-            showSpine: showSpine
-        )
-        .frame(height: show ? rowHeight : 0)
-        .opacity((show && showSpine) ? 1 : 0)  // vanish as soon as Edit starts
-        .offset(x: offsetX)  // slide with the spine
-        .animation(
-            .easeInOut(duration: TimelineStyle.cardRepositionDuration),
-            value: show
-        )  // space collapse
-        .animation(
-            .easeInOut(duration: TimelineStyle.spineFadeDuration),
-            value: showSpine
-        )  // fade/slide with spine
-        .animation(
-            .easeInOut(duration: TimelineStyle.spineFadeDuration),
-            value: show
-        )  // fade when time-window flips
-        .allowsHitTesting(false)
-        .accessibilityHidden(!show)
+    private func GapSpaceRow(show: Bool) -> some View {
+        let rowHeight: CGFloat = 26  // match TimelineGapSpineRow
+        Color.clear
+            .frame(height: show ? rowHeight : 0)
+            .animation(
+                .easeInOut(duration: TimelineStyle.cardRepositionDuration),
+                value: show
+            )
+            .accessibilityHidden(true)
     }
 
     // MARK: - Time helpers
@@ -316,9 +352,9 @@ struct TodayTimelineView: View {
     private func startOfDay(_ date: Date) -> Date {
         Calendar.current.startOfDay(for: date)
     }
-
     private func endOfDay(_ date: Date) -> Date {
         Calendar.current.date(byAdding: .day, value: 1, to: startOfDay(date))
             ?? date
     }
+
 }
