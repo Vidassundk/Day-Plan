@@ -1,3 +1,4 @@
+// TodayTimelineView.swift
 import SwiftData
 import SwiftUI
 import UIKit
@@ -20,6 +21,8 @@ struct TodayTimelineView: View {
 
     private let tick: TimeInterval = 1
     private let editMinuteHeight: CGFloat = 0.9
+    private let spineFadeDuration: Double = 0.22
+    private let repositionDuration: Double = 0.38
 
     init(templateID: UUID) {
         self.templateID = templateID
@@ -53,121 +56,116 @@ struct TodayTimelineView: View {
                         )
                     }
 
+                    // Decoupled rendering: spines and cards are independent layers.
                     ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            // Spacer from 00:00 → first plan start (Edit) or the "until next plan" row (View).
-                            if mode == .edit, let first = plans.first {
-                                let lead = max(
-                                    0,
-                                    Int(
-                                        first.startTime.timeIntervalSince(
-                                            startOfDay(now)
-                                        ) / 60
-                                    )
-                                )
-                                if lead > 0 {
-                                    Color.clear.frame(
-                                        height: CGFloat(lead) * editMinuteHeight
+                        ZStack(alignment: .topLeading) {
+
+                            // ======================
+                            // Spines layer (left)
+                            // ======================
+                            VStack(alignment: .leading, spacing: 0) {
+                                // View-mode only: gap before first item (no relocating spacers).
+                                if mode == .view, let first = plans.first, now < first.startTime {
+                                    TimelineGapSpineRow(kind: .beforeFirst)
+                                }
+
+                                ForEach(Array(plans.enumerated()), id: \.element.id) { i, sp in
+                                    // View-mode gap continuation between items (spine only).
+                                    if mode == .view, i > 0 {
+                                        let prev = plans[i - 1]
+                                        if now >= prev.endTime && now < sp.startTime {
+                                            TimelineGapSpineRow(kind: .between)
+                                        }
+                                    }
+
+                                    // Keep spine rows at view height and simply fade/slide out on Edit.
+                                    TimelineSpineOnlyRow(
+                                        sp: sp,
+                                        isFirst: i == 0,
+                                        isLast: i == plans.count - 1,
+                                        now: now,
+                                        showSpine: showSpine,
+                                        isEditing: false,                 // <- no relocation
+                                        editMinuteHeight: editMinuteHeight
                                     )
                                 }
-                            } else if let first = plans.first,
-                                now < first.startTime
-                            {
-                                let minsLeft = max(
-                                    0,
-                                    Int(
-                                        first.startTime.timeIntervalSince(now)
-                                            / 60
-                                    )
-                                )
-                                TimelineGapRow(
-                                    minutesUntil: minsLeft,
-                                    showSpine: showSpine,
-                                    isEditing: (mode == .edit),
-                                    kind: .beforeFirst
-                                )
-                                .transition(.opacity)
                             }
 
-                            ForEach(Array(plans.enumerated()), id: \.element.id)
-                            { i, sp in
-                                // Spacer between items in Edit mode based on actual time deltas.
-                                if mode == .edit, i > 0 {
-                                    let prev = plans[i - 1]
-                                    let gap = max(
+                            // ======================
+                            // Cards layer (right)
+                            // ======================
+                            VStack(alignment: .leading, spacing: 0) {
+                                // Spacer from 00:00 → first plan start (Edit) or gap label (View).
+                                if let first = plans.first {
+                                    let lead = max(
                                         0,
-                                        Int(
-                                            sp.startTime.timeIntervalSince(
-                                                prev.endTime
-                                            ) / 60
-                                        )
+                                        Int(first.startTime.timeIntervalSince(startOfDay(now)) / 60)
                                     )
-                                    if gap > 0 {
-                                        Color.clear.frame(
-                                            height: CGFloat(gap)
-                                                * editMinuteHeight
-                                        )
-                                    }
-                                }
-
-                                // ⬇️ INSERT the new View-mode block here ⬇️
-                                // View mode: if "now" falls between the previous plan's end and this plan's start,
-                                // show the "until next plan" row.
-                                if mode == .view, i > 0 {
-                                    let prev = plans[i - 1]
-                                    if now >= prev.endTime && now < sp.startTime
-                                    {
-                                        let minsLeft = max(
-                                            0,
-                                            Int(
-                                                sp.startTime.timeIntervalSince(
-                                                    now
-                                                ) / 60
-                                            )
-                                        )
-                                        TimelineGapRow(
+                                    AnimHeightSpacer(
+                                        height: (mode == .edit) ? CGFloat(lead) * editMinuteHeight : 0,
+                                        animate: mode == .edit,
+                                        delay: 0,                           // <- start instantly
+                                        duration: repositionDuration
+                                    )
+                                    if mode == .view, now < first.startTime {
+                                        let minsLeft = max(0, Int(first.startTime.timeIntervalSince(now) / 60))
+                                        TimelineGapCardRow(
                                             minutesUntil: minsLeft,
-                                            showSpine: showSpine,
                                             isEditing: false,
-                                            kind: .between
+                                            reserveGutter: (mode == .edit) || showSpine
                                         )
                                         .transition(.opacity)
                                     }
                                 }
 
-                                TimelineSpineRow(
-                                    sp: sp,
-                                    isFirst: i == 0,
-                                    isLast: i == plans.count - 1,
-                                    dayStart: startOfDay(now),
-                                    now: now,
-                                    showSpine: showSpine,
-                                    isEditing: (mode == .edit),
-                                    editMinuteHeight: editMinuteHeight
-                                )
-                            }
+                                ForEach(Array(plans.enumerated()), id: \.element.id) { i, sp in
+                                    if i > 0 {
+                                        let prev = plans[i - 1]
+                                        let gap = max(0, Int(sp.startTime.timeIntervalSince(prev.endTime) / 60))
+                                        AnimHeightSpacer(
+                                            height: (mode == .edit) ? CGFloat(gap) * editMinuteHeight : 0,
+                                            animate: mode == .edit,
+                                            delay: 0,                       // <- start instantly
+                                            duration: repositionDuration
+                                        )
+                                        if mode == .view, now >= prev.endTime && now < sp.startTime {
+                                            let minsLeft = max(0, Int(sp.startTime.timeIntervalSince(now) / 60))
+                                            TimelineGapCardRow(
+                                                minutesUntil: minsLeft,
+                                                isEditing: false,
+                                                reserveGutter: (mode == .edit) || showSpine
+                                            )
+                                            .transition(.opacity)
+                                        }
+                                    }
 
-                            // Optional tail to 24:00 in Edit mode to complete the 24h stack.
-                            if mode == .edit, let last = plans.last {
-                                let tail = max(
-                                    0,
-                                    Int(
-                                        endOfDay(now).timeIntervalSince(
-                                            last.endTime
-                                        ) / 60
+                                    TimelineCardOnlyRow(
+                                        sp: sp,
+                                        isFirst: i == 0,
+                                        isLast: i == plans.count - 1,
+                                        now: now,
+                                        isEditing: (mode == .edit),
+                                        editMinuteHeight: editMinuteHeight,
+                                        reserveGutter: (mode == .edit) || showSpine
                                     )
-                                )
-                                if tail > 0 {
-                                    Color.clear.frame(
-                                        height: CGFloat(tail) * editMinuteHeight
+                                }
+
+                                // Tail to 24:00 (animates 0 → value in Edit)
+                                if let last = plans.last {
+                                    let tail = max(
+                                        0,
+                                        Int(endOfDay(now).timeIntervalSince(last.endTime) / 60)
+                                    )
+                                    AnimHeightSpacer(
+                                        height: (mode == .edit) ? CGFloat(tail) * editMinuteHeight : 0,
+                                        animate: mode == .edit,
+                                        delay: 0,                           // <- start instantly
+                                        duration: repositionDuration
                                     )
                                 }
                             }
                         }
-                        .padding(
-                            .top,
-                            mode == .edit ? HoursGridLayer.topInset : 0
-                        )
+                        .padding(.top, mode == .edit ? HoursGridLayer.topInset : 0)
                         .padding(.vertical, mode == .edit ? 0 : 8)
                     }
                     .scrollIndicators(.never)
@@ -200,6 +198,23 @@ struct TodayTimelineView: View {
     private func endOfDay(_ date: Date) -> Date {
         Calendar.current.date(byAdding: .day, value: 1, to: startOfDay(date))
             ?? date
+    }
+}
+
+// MARK: - Anim utilities
+private struct AnimHeightSpacer: View {
+    let height: CGFloat
+    let animate: Bool
+    let delay: Double
+    let duration: Double
+
+    var body: some View {
+        Color.clear
+            .frame(height: height)
+            .animation(
+                animate ? .easeInOut(duration: duration).delay(delay) : nil,
+                value: height
+            )
     }
 }
 
