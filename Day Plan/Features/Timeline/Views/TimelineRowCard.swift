@@ -107,6 +107,13 @@ struct TimelineCardOnlyRow: View {
         Calendar.current.date(byAdding: .minute, value: visualDurationMinutes, to: previewStart) ?? end
     }
 
+    /// Extra visual growth in points when extending the card beyond its base duration (Edit mode only).
+    private var extraGrowthHeight: CGFloat {
+        guard isEditing else { return 0 }
+        let extraMinutes = max(0, visualDurationMinutes - durationMinutes)
+        return CGFloat(extraMinutes) * editMinuteHeight
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -161,6 +168,11 @@ struct TimelineCardOnlyRow: View {
                     .padding(6)
                     .accessibilityHidden(true)
             }
+            // Bottom resize handle embedded in the card so it moves with offset
+            if isEditing {
+                VStack { Spacer(); resizeHandleBottom }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -169,6 +181,8 @@ struct TimelineCardOnlyRow: View {
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        // Keep layout from pushing siblings when extending in Edit (visual overlap only)
+        .padding(.bottom, isEditing ? -extraGrowthHeight : 0)
         .opacity(status == .past ? 0.6 : 1)
         .padding(.vertical, isEditing ? 0 : TimelineStyle.cardVerticalPadView)
         .padding(.leading, currentGutter)
@@ -180,11 +194,9 @@ struct TimelineCardOnlyRow: View {
         // Move with visual offset in Edit and make the transform affect hit testing
         .offset(y: isEditing ? CGFloat(visualOffsetMinutes) * editMinuteHeight : 0)
         // Keep lifted above siblings while editing to avoid hit-test conflicts
-        .zIndex(isEditing ? (isInteracting ? 10 : 2) : 0)
+        .zIndex(isEditing ? (isInteracting ? 200 : 100) : 0)
         // Whole-card move gesture (bottom handle has high priority and will override when grabbed)
         .gesture(moveDragGesture)
-        // Bottom resize handle that travels with the transformed card
-        .overlay(alignment: Alignment.bottom) { Group { if isEditing { resizeHandleBottom } } }
         .onAppear {
             currentGutter = keepGutterSpace ? totalGutter : 0
             displayedProgress = liveProgress
@@ -225,9 +237,9 @@ struct TimelineCardOnlyRow: View {
         Capsule()
             .fill(.primary.opacity(0.15))
             .frame(width: handleSize.width, height: handleSize.height)
+            .contentShape(Rectangle())
             .overlay(Capsule().stroke(.primary.opacity(0.25), lineWidth: 1))
             .padding(.bottom, 4)
-            // High priority so grabbing the handle never triggers the move gesture
             .highPriorityGesture(bottomResizeGesture)
             .accessibilityLabel("Resize end time")
     }
