@@ -24,8 +24,8 @@ enum TimelineStyle {
     }
 
     // Animations (centralized)
-    static var spineFadeDuration: Double { scaled(0.7) }
-    static var cardRepositionDuration: Double { scaled(1) }
+    static var spineFadeDuration: Double { scaled(0.6) }
+    static var cardRepositionDuration: Double { scaled(0.6) }
     static var gutterAnimationDuration: Double { scaled(1) }
     static var gutterCollapseDelay: Double { scaled(1) }
     static var progressAnimDuration: Double { scaled(1) }
