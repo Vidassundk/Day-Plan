@@ -151,9 +151,7 @@ struct TimelineCardOnlyRow: View {
     }
 
     private var repositionAnimation: Animation {
-        isEditing
-            ? .easeInOut(duration: TimelineStyle.cardRepositionDuration)
-            : .easeInOut(duration: TimelineStyle.generic(0.28))
+        .easeInOut(duration: TimelineStyle.cardRepositionDuration)
     }
 
     private var accessibilityText: Text {
