@@ -29,6 +29,7 @@ enum TimelineStyle {
     static var gutterAnimationDuration: Double { scaled(1) }
     static var gutterCollapseDelay: Double { scaled(1) }
     static var progressAnimDuration: Double { scaled(1) }
+
     static func generic(_ base: Double) -> Double { scaled(base) }
 
     // Edit scale (px/min)

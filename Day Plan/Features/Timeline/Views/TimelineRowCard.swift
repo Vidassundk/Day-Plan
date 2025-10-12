@@ -32,6 +32,7 @@ struct TimelineCardOnlyRow: View {
     // Bottom-resize state
     @State private var baseBottomDeltaMinutes: Int = 0   // accumulated committed resize delta
     @State private var proposedBottomDeltaMinutes: Int = 0 // live preview while resizing
+    @State private var liveResizePoints: CGFloat = 0 // continuous, unsnapped drag distance (points) during resize
 
     @State private var isInteracting: Bool = false
 
@@ -70,9 +71,11 @@ struct TimelineCardOnlyRow: View {
 
     /// Card height reflects live resize preview in Edit, fixed row in View.
     private var cardHeight: CGFloat {
-        isEditing
-            ? CGFloat(visualDurationMinutes) * editMinuteHeight
-            : TimelineStyle.viewModeRowHeight
+        if isEditing {
+            return CGFloat(visualDurationMinutesDouble) * editMinuteHeight
+        } else {
+            return TimelineStyle.viewModeRowHeight
+        }
     }
 
     private var keepGutterSpace: Bool { reserveGutter }
@@ -82,9 +85,11 @@ struct TimelineCardOnlyRow: View {
 
     /// Snap vertically to whole-minute steps; preserves sign for up/down.
     private func snapToMinutes(_ dy: CGFloat) -> Int {
+        // Stable quantization: truncate toward zero so we only step
+        // when the pointer crosses a full minute boundary. This avoids
+        // oscillating around 0.5-step thresholds during drags.
         let raw = dy / editMinuteHeight
-        if raw == 0 { return 0 }
-        return Int(raw.rounded())
+        return Int(raw.rounded(.towardZero))
     }
 
     /// Proposed vertical offset (in minutes) while moving in Edit.
@@ -93,12 +98,16 @@ struct TimelineCardOnlyRow: View {
         return proposedOffsetMinutes
     }
 
-    /// Proposed duration (in minutes) while resizing in Edit; enforces a minimum height.
-    private var visualDurationMinutes: Int {
-        guard isEditing else { return durationMinutes }
-        let raw = durationMinutes + proposedBottomDeltaMinutes
-        return max(minDurationMinutes, raw)
+    /// Proposed duration (as Double minutes) while resizing in Edit; enforces a minimum.
+    private var visualDurationMinutesDouble: Double {
+        guard isEditing else { return Double(durationMinutes) }
+        let base = Double(durationMinutes + baseBottomDeltaMinutes)
+        let live = Double(liveResizePoints / editMinuteHeight)
+        let combined = base + live
+        return max(Double(minDurationMinutes), combined)
     }
+    /// Integer minutes helper for date previews.
+    private var visualDurationMinutes: Int { Int(visualDurationMinutesDouble.rounded(.towardZero)) }
 
     private var previewStart: Date {
         Calendar.current.date(byAdding: .minute, value: visualOffsetMinutes, to: start) ?? start
@@ -110,7 +119,7 @@ struct TimelineCardOnlyRow: View {
     /// Extra visual growth in points when extending the card beyond its base duration (Edit mode only).
     private var extraGrowthHeight: CGFloat {
         guard isEditing else { return 0 }
-        let extraMinutes = max(0, visualDurationMinutes - durationMinutes)
+        let extraMinutes = max(0.0, visualDurationMinutesDouble - Double(durationMinutes))
         return CGFloat(extraMinutes) * editMinuteHeight
     }
 
@@ -202,6 +211,7 @@ struct TimelineCardOnlyRow: View {
             displayedProgress = liveProgress
         }
         .onChange(of: liveProgress) { new in
+            guard !isInteracting else { return }
             if isCollapsing {
                 displayedProgress = new
             } else {
@@ -251,10 +261,14 @@ struct TimelineCardOnlyRow: View {
             }
             .onChanged { value in
                 guard isEditing else { return }
-                isInteracting = true
-                let snap = snapToMinutes(value.translation.height)
-                // Live preview uses base + snap (do not accumulate here)
-                proposedOffsetMinutes = baseOffsetMinutes + snap
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) {
+                    isInteracting = true
+                    let snap = snapToMinutes(value.translation.height)
+                    // Live preview uses base + snap (do not accumulate here)
+                    proposedOffsetMinutes = baseOffsetMinutes + snap
+                }
             }
             .onEnded { value in
                 guard isEditing else { return }
@@ -267,18 +281,19 @@ struct TimelineCardOnlyRow: View {
     }
 
     private var bottomResizeGesture: some Gesture {
-        DragGesture(minimumDistance: 2)
-            .updating($resizeBottomTranslationY) { value, state, _ in
-                state = value.translation.height
-            }
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
             .onChanged { value in
                 guard isEditing else { return }
-                isInteracting = true
-                let snap = snapToMinutes(value.translation.height)
-                // Live combined value relative to the original duration
-                let combined = baseBottomDeltaMinutes + snap
-                let minCombined = -(durationMinutes - minDurationMinutes)
-                proposedBottomDeltaMinutes = max(minCombined, combined)
+                var tx = Transaction(); tx.disablesAnimations = true
+                withTransaction(tx) {
+                    isInteracting = true
+                    // Continuous live growth in points; clamp so duration never drops below min
+                    let baseMins = durationMinutes + baseBottomDeltaMinutes
+                    let liveMins = Double(value.translation.height / editMinuteHeight)
+                    let minLiveMins = Double(minDurationMinutes - baseMins) // negative or zero
+                    let clampedLiveMins = max(minLiveMins, liveMins)
+                    liveResizePoints = CGFloat(clampedLiveMins) * editMinuteHeight
+                }
             }
             .onEnded { value in
                 guard isEditing else { return }
@@ -286,6 +301,7 @@ struct TimelineCardOnlyRow: View {
                 let minCombined = -(durationMinutes - minDurationMinutes)
                 baseBottomDeltaMinutes = max(minCombined, baseBottomDeltaMinutes + snap)
                 proposedBottomDeltaMinutes = baseBottomDeltaMinutes
+                liveResizePoints = 0
                 isInteracting = false
             }
     }
