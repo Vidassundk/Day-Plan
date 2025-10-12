@@ -116,11 +116,14 @@ struct TimelineCardOnlyRow: View {
         Calendar.current.date(byAdding: .minute, value: visualDurationMinutes, to: previewStart) ?? end
     }
 
-    /// Extra visual growth in points when extending the card beyond its base duration (Edit mode only).
-    private var extraGrowthHeight: CGFloat {
+    /// Layout padding adjustment that keeps the stack footprint at the baseline while resizing (Edit only).
+    /// If the card grows, we use negative padding (overlap). If it shrinks, we add positive padding
+    /// equal to the lost height so rows below never get pulled up.
+    private var editPaddingAdjustment: CGFloat {
         guard isEditing else { return 0 }
-        let extraMinutes = max(0.0, visualDurationMinutesDouble - Double(durationMinutes))
-        return CGFloat(extraMinutes) * editMinuteHeight
+        let deltaMinutes = visualDurationMinutesDouble - Double(durationMinutes)
+        // positive delta (extended) -> negative padding; negative delta (shrunk) -> positive padding
+        return CGFloat(-deltaMinutes) * editMinuteHeight
     }
 
     // MARK: - Body
@@ -190,8 +193,8 @@ struct TimelineCardOnlyRow: View {
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
-        // Keep layout from pushing siblings when extending in Edit (visual overlap only)
-        .padding(.bottom, isEditing ? -extraGrowthHeight : 0)
+        // Keep layout constant in Edit for both growth and shrink (no push/pull of siblings)
+        .padding(.bottom, editPaddingAdjustment)
         .opacity(status == .past ? 0.6 : 1)
         .padding(.vertical, isEditing ? 0 : TimelineStyle.cardVerticalPadView)
         .padding(.leading, currentGutter)
