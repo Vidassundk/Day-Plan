@@ -180,11 +180,6 @@ struct TimelineCardOnlyRow: View {
                     .padding(6)
                     .accessibilityHidden(true)
             }
-            // Bottom resize handle embedded in the card so it moves with offset
-            if isEditing {
-                VStack { Spacer(); resizeHandleBottom }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
@@ -193,6 +188,12 @@ struct TimelineCardOnlyRow: View {
             Color(uiColor: .secondarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .overlay(alignment: .bottom) {
+            // Bottom resize handle overlaid at the actual bottom of the card background
+            if isEditing {
+                resizeHandleBottom
+            }
+        }
         // Keep layout constant in Edit for both growth and shrink (no push/pull of siblings)
         .padding(.bottom, editPaddingAdjustment)
         .opacity(status == .past ? 0.6 : 1)
@@ -249,10 +250,10 @@ struct TimelineCardOnlyRow: View {
     private var resizeHandleBottom: some View {
         Capsule()
             .fill(.primary.opacity(0.15))
-            .frame(width: handleSize.width, height: handleSize.height)
+            .frame(height: handleSize.height)
             .contentShape(Rectangle())
             .overlay(Capsule().stroke(.primary.opacity(0.25), lineWidth: 1))
-            .padding(.bottom, 4)
+            .padding(.horizontal, 12) // Match card's horizontal padding
             .highPriorityGesture(bottomResizeGesture)
             .accessibilityLabel("Resize end time")
     }

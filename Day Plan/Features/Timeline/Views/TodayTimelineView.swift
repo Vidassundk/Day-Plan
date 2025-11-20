@@ -114,6 +114,7 @@ struct TodayTimelineView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 260)
         }
+
     }
 
     // MARK: - Helper Layers (split to keep type-checker happy)
