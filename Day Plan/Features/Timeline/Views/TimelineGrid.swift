@@ -85,11 +85,8 @@ struct HoursGridLayer: View {
     }
 
     private func formattedHour(_ offset: Int) -> String {
-        let date =
-            Calendar.current.date(byAdding: .hour, value: offset, to: start)
-            ?? start
-        return date.formatted(
-            Date.FormatStyle(date: .omitted, time: .shortened)
-        )
+        // Simple hour formatting: 0-23 in 24-hour format
+        let hour = offset % 24
+        return String(format: "%02d:00", hour)
     }
 }

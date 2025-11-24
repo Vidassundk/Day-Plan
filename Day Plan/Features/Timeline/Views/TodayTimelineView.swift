@@ -264,10 +264,12 @@ struct TodayTimelineView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Spacer before the first plan
             if let first = plans.first {
-                let lead = max(
-                    0,
-                    Int(first.startTime.timeIntervalSince(startOfDay) / 60)
-                )
+                // Extract time components and calculate offset from start of day
+                let calendar = Calendar.current
+                let components = calendar.dateComponents([.hour, .minute], from: first.startTime)
+                let minutesFromMidnight = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                
+                let lead = max(0, minutesFromMidnight)
                 let showFirstGapRow = (!isEditing && now < first.startTime)
 
                 AnimHeightSpacer(
@@ -287,10 +289,17 @@ struct TodayTimelineView: View {
 
                 if i > 0 {
                     let prev = plans[i - 1]
-                    let gap = max(
-                        0,
-                        Int(sp.startTime.timeIntervalSince(prev.endTime) / 60)
-                    )
+                    
+                    // Calculate gap using time components to avoid timezone issues
+                    let calendar = Calendar.current
+                    let prevEnd = calendar.dateComponents([.hour, .minute], from: prev.endTime)
+                    let currentStart = calendar.dateComponents([.hour, .minute], from: sp.startTime)
+                    
+                    let prevEndMinutes = (prevEnd.hour ?? 0) * 60 + (prevEnd.minute ?? 0)
+                    let currentStartMinutes = (currentStart.hour ?? 0) * 60 + (currentStart.minute ?? 0)
+                    
+                    let gap = max(0, currentStartMinutes - prevEndMinutes)
+                    
                     let showBetweenGapRow =
                         (!isEditing && now >= prev.endTime
                             && now < sp.startTime)
@@ -321,10 +330,14 @@ struct TodayTimelineView: View {
 
             // Spacer after the last plan
             if let last = plans.last {
-                let tail = max(
-                    0,
-                    Int(endDay.timeIntervalSince(last.endTime) / 60)
-                )
+                // Calculate remaining minutes until end of day using time components
+                let calendar = Calendar.current
+                let lastEnd = calendar.dateComponents([.hour, .minute], from: last.endTime)
+                let lastEndMinutes = (lastEnd.hour ?? 0) * 60 + (lastEnd.minute ?? 0)
+                let minutesInDay = 24 * 60
+                
+                let tail = max(0, minutesInDay - lastEndMinutes)
+                
                 AnimHeightSpacer(
                     height: isEditing ? CGFloat(tail) * minuteHeight : 0,
                     animate: isEditing,
