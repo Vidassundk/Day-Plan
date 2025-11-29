@@ -153,8 +153,11 @@ struct TodayTimelineView: View {
         -> some View
     {
         VStack(alignment: .leading, spacing: 0) {
-            if let first = plans.first, now < first.startTime {
-                TimelineGapSpineRow(kind: .beforeFirst, showSpine: showSpine)
+            if let first = plans.first {
+                let projectedStart = projectToToday(first.startTime, now: now)
+                if now < projectedStart {
+                    TimelineGapSpineRow(kind: .beforeFirst, showSpine: showSpine)
+                }
             }
 
             ForEach(plans.indices, id: \.self) { i in
@@ -162,7 +165,9 @@ struct TodayTimelineView: View {
 
                 if i > 0 {
                     let prev = plans[i - 1]
-                    if now >= prev.endTime && now < sp.startTime {
+                    let projectedPrevEnd = projectToToday(prev.endTime, now: now)
+                    let projectedStart = projectToToday(sp.startTime, now: now)
+                    if now >= projectedPrevEnd && now < projectedStart {
                         TimelineGapSpineRow(
                             kind: .between,
                             showSpine: showSpine
@@ -195,23 +200,26 @@ struct TodayTimelineView: View {
             + (TimelineStyle.cardVerticalPadView * 2)
         VStack(alignment: .leading, spacing: 0) {
             // Before-first gap label
-            if let first = plans.first, now < first.startTime {
-                let minsLeft = max(
-                    0,
-                    Int(first.startTime.timeIntervalSince(now) / 60)
-                )
-                TimelineGapCardRow(
-                    minutesUntil: minsLeft,
-                    isEditing: false,
-                    reserveGutter: true,
-                    showSpine: showSpine
-                )
-                .opacity(showSpine ? 1 : 0)
-                .animation(
-                    .easeInOut(duration: TimelineStyle.spineFadeDuration),
-                    value: showSpine
-                )
-                .transition(.opacity)
+            if let first = plans.first {
+                let projectedStart = projectToToday(first.startTime, now: now)
+                if now < projectedStart {
+                    let minsLeft = max(
+                        0,
+                        Int(projectedStart.timeIntervalSince(now) / 60)
+                    )
+                    TimelineGapCardRow(
+                        minutesUntil: minsLeft,
+                        isEditing: false,
+                        reserveGutter: true,
+                        showSpine: showSpine
+                    )
+                    .opacity(showSpine ? 1 : 0)
+                    .animation(
+                        .easeInOut(duration: TimelineStyle.spineFadeDuration),
+                        value: showSpine
+                    )
+                    .transition(.opacity)
+                }
             }
 
             // For each plan: optional between-gap label + fixed-height spacer matching the spine row
@@ -219,10 +227,12 @@ struct TodayTimelineView: View {
                 let sp = plans[i]
                 if i > 0 {
                     let prev = plans[i - 1]
-                    if now >= prev.endTime && now < sp.startTime {
+                    let projectedPrevEnd = projectToToday(prev.endTime, now: now)
+                    let projectedStart = projectToToday(sp.startTime, now: now)
+                    if now >= projectedPrevEnd && now < projectedStart {
                         let minsLeft = max(
                             0,
-                            Int(sp.startTime.timeIntervalSince(now) / 60)
+                            Int(projectedStart.timeIntervalSince(now) / 60)
                         )
                         TimelineGapCardRow(
                             minutesUntil: minsLeft,
@@ -270,7 +280,8 @@ struct TodayTimelineView: View {
                 let minutesFromMidnight = (components.hour ?? 0) * 60 + (components.minute ?? 0)
                 
                 let lead = max(0, minutesFromMidnight)
-                let showFirstGapRow = (!isEditing && now < first.startTime)
+                let projectedStart = projectToToday(first.startTime, now: now)
+                let showFirstGapRow = (!isEditing && now < projectedStart)
 
                 AnimHeightSpacer(
                     height: isEditing ? CGFloat(lead) * minuteHeight : 0,
@@ -300,9 +311,11 @@ struct TodayTimelineView: View {
                     
                     let gap = max(0, currentStartMinutes - prevEndMinutes)
                     
+                    let projectedPrevEnd = projectToToday(prev.endTime, now: now)
+                    let projectedStart = projectToToday(sp.startTime, now: now)
                     let showBetweenGapRow =
-                        (!isEditing && now >= prev.endTime
-                            && now < sp.startTime)
+                        (!isEditing && now >= projectedPrevEnd
+                            && now < projectedStart)
 
                     // Spacer representing the time gap (Edit only)
                     AnimHeightSpacer(
@@ -324,7 +337,9 @@ struct TodayTimelineView: View {
                     now: now,
                     isEditing: isEditing,
                     editMinuteHeight: minuteHeight,
-                    reserveGutter: isEditing || (mode == .view)
+                    reserveGutter: isEditing || (mode == .view),
+                    startOfDay: startOfDay,
+                    endOfDay: endDay
                 )
             }
 
@@ -369,6 +384,16 @@ struct TodayTimelineView: View {
     private func endOfDay(_ date: Date) -> Date {
         Calendar.current.date(byAdding: .day, value: 1, to: startOfDay(date))
             ?? date
+    }
+    
+    /// Projects a scheduled plan's time onto today's date, preserving the time-of-day.
+    /// This ensures that template plans (which may have been created on a different day)
+    /// are evaluated relative to the current day for status calculations.
+    private func projectToToday(_ date: Date, now: Date) -> Date {
+        let calendar = Calendar.current
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: date)
+        let todayStart = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: timeComponents, to: todayStart) ?? date
     }
 
 }

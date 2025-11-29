@@ -1,4 +1,5 @@
 import SwiftData
+import SwiftData
 import SwiftUI
 
 /// Card-only rendering for a scheduled plan row (no spine drawing).
@@ -12,6 +13,10 @@ struct TimelineCardOnlyRow: View {
     let editMinuteHeight: CGFloat
     /// If true, keeps the left gutter equal to the spine column width so layout matches when spines overlay.
     let reserveGutter: Bool
+    /// Start of the timeline day (0:00)
+    let startOfDay: Date
+    /// End of the timeline day (24:00)
+    let endOfDay: Date
 
     // VM
     @StateObject private var vm: TimelineSpineRowViewModel
@@ -45,7 +50,9 @@ struct TimelineCardOnlyRow: View {
         now: Date,
         isEditing: Bool,
         editMinuteHeight: CGFloat,
-        reserveGutter: Bool
+        reserveGutter: Bool,
+        startOfDay: Date,
+        endOfDay: Date
     ) {
         self.sp = sp
         self.isFirst = isFirst
@@ -54,6 +61,8 @@ struct TimelineCardOnlyRow: View {
         self.isEditing = isEditing
         self.editMinuteHeight = editMinuteHeight
         self.reserveGutter = reserveGutter
+        self.startOfDay = startOfDay
+        self.endOfDay = endOfDay
         _vm = StateObject(wrappedValue: TimelineSpineRowViewModel(sp: sp))
     }
 
@@ -90,6 +99,31 @@ struct TimelineCardOnlyRow: View {
         // oscillating around 0.5-step thresholds during drags.
         let raw = dy / editMinuteHeight
         return Int(raw.rounded(.towardZero))
+    }
+    
+    /// Clamp offset so card stays within 0:00 - 24:00 timeline bounds.
+    private func clampOffsetToTimeline(_ offsetMinutes: Int) -> Int {
+        let calendar = Calendar.current
+        
+        // Get current time components of the card
+        let currentComponents = calendar.dateComponents([.hour, .minute], from: start)
+        let currentMinutesFromMidnight = (currentComponents.hour ?? 0) * 60 + (currentComponents.minute ?? 0)
+        
+        // Calculate new position with offset
+        let newStartMinutes = currentMinutesFromMidnight + offsetMinutes
+        let newEndMinutes = newStartMinutes + durationMinutes
+        
+        // Clamp to 0:00 (minute 0)
+        if newStartMinutes < 0 {
+            return -currentMinutesFromMidnight
+        }
+        
+        // Clamp to 24:00 (minute 1440)
+        if newEndMinutes > 1440 {
+            return 1440 - currentMinutesFromMidnight - durationMinutes
+        }
+        
+        return offsetMinutes
     }
 
     /// Proposed vertical offset (in minutes) while moving in Edit.
@@ -250,10 +284,9 @@ struct TimelineCardOnlyRow: View {
     private var resizeHandleBottom: some View {
         Capsule()
             .fill(.primary.opacity(0.15))
-            .frame(height: handleSize.height)
+            .frame(width: handleSize.width, height: handleSize.height)
             .contentShape(Rectangle())
             .overlay(Capsule().stroke(.primary.opacity(0.25), lineWidth: 1))
-            .padding(.horizontal, 12) // Match card's horizontal padding
             .highPriorityGesture(bottomResizeGesture)
             .accessibilityLabel("Resize end time")
     }
@@ -270,16 +303,18 @@ struct TimelineCardOnlyRow: View {
                 withTransaction(tx) {
                     isInteracting = true
                     let snap = snapToMinutes(value.translation.height)
-                    // Live preview uses base + snap (do not accumulate here)
-                    proposedOffsetMinutes = baseOffsetMinutes + snap
+                    // Clamp to timeline bounds (0:00 - 24:00)
+                    let clamped = clampOffsetToTimeline(baseOffsetMinutes + snap)
+                    proposedOffsetMinutes = clamped
                 }
             }
             .onEnded { value in
                 guard isEditing else { return }
                 let snap = snapToMinutes(value.translation.height)
-                // Commit: advance the base, then reflect in proposed
-                baseOffsetMinutes += snap
-                proposedOffsetMinutes = baseOffsetMinutes
+                // Commit with clamping
+                let clamped = clampOffsetToTimeline(baseOffsetMinutes + snap)
+                baseOffsetMinutes = clamped
+                proposedOffsetMinutes = clamped
                 isInteracting = false
             }
     }

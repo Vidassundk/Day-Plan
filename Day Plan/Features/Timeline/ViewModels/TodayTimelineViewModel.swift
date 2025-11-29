@@ -52,8 +52,8 @@ final class TodayTimelineViewModel: ObservableObject {
     enum Status { case past, current, upcoming }
 
     func status(of sp: ScheduledPlan, now: Date) -> Status {
-        let start = sp.startTime
-        let end = sp.endTime
+        let start = projectToToday(sp.startTime, now: now)
+        let end = projectToToday(sp.endTime, now: now)
         if now < start { return .upcoming }
         if now >= start && now < end { return .current }
         return .past
@@ -89,5 +89,17 @@ final class TodayTimelineViewModel: ObservableObject {
             start: start, requestedMinutes: Int(sp.duration / 60), day: window
         )
         return start.addingTimeInterval(TimeInterval(minutes * 60))
+    }
+    
+    // MARK: - Private helpers
+    
+    /// Projects a scheduled plan's time onto today's date, preserving the time-of-day.
+    /// This ensures that template plans (which may have been created on a different day)
+    /// are evaluated relative to the current day for status calculations.
+    private func projectToToday(_ date: Date, now: Date) -> Date {
+        let calendar = Calendar.current
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: date)
+        let todayStart = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: timeComponents, to: todayStart) ?? date
     }
 }
