@@ -18,6 +18,9 @@ struct TimelineCardOnlyRow: View {
     /// End of the timeline day (24:00)
     let endOfDay: Date
 
+    // Model context for persisting edits
+    @Environment(\.modelContext) private var modelContext
+    
     // VM
     @StateObject private var vm: TimelineSpineRowViewModel
 
@@ -316,6 +319,9 @@ struct TimelineCardOnlyRow: View {
                 baseOffsetMinutes = clamped
                 proposedOffsetMinutes = clamped
                 isInteracting = false
+                
+                // Persist to SwiftData
+                persistMoveChange(offsetMinutes: clamped)
             }
     }
 
@@ -342,6 +348,9 @@ struct TimelineCardOnlyRow: View {
                 proposedBottomDeltaMinutes = baseBottomDeltaMinutes
                 liveResizePoints = 0
                 isInteracting = false
+                
+                // Persist to SwiftData
+                persistResizeChange(durationDeltaMinutes: baseBottomDeltaMinutes)
             }
     }
 
@@ -362,5 +371,52 @@ struct TimelineCardOnlyRow: View {
             }
         }()
         return title + Text(". ") + state + Text(". ") + time
+    }
+    
+    // MARK: - Persistence
+    
+    /// Persist move (time offset) changes to the ScheduledPlan model
+    private func persistMoveChange(offsetMinutes: Int) {
+        guard offsetMinutes != 0 else { return }
+        
+        // Calculate new start time
+        let newStart = Calendar.current.date(
+            byAdding: .minute,
+            value: offsetMinutes,
+            to: sp.startTime
+        ) ?? sp.startTime
+        
+        // Update the model
+        sp.startTime = newStart
+        
+        // SwiftData auto-saves when modelContext is in scope
+        try? modelContext.save()
+        
+        // Reset accumulated offset since we've persisted
+        DispatchQueue.main.async {
+            baseOffsetMinutes = 0
+            proposedOffsetMinutes = 0
+        }
+    }
+    
+    /// Persist resize (duration) changes to the ScheduledPlan model
+    private func persistResizeChange(durationDeltaMinutes: Int) {
+        guard durationDeltaMinutes != 0 else { return }
+        
+        // Calculate new duration
+        let newDurationMinutes = durationMinutes + durationDeltaMinutes
+        let newDuration = TimeInterval(max(minDurationMinutes, newDurationMinutes) * 60)
+        
+        // Update the model
+        sp.duration = newDuration
+        
+        // SwiftData auto-saves when modelContext is in scope
+        try? modelContext.save()
+        
+        // Reset accumulated delta since we've persisted
+        DispatchQueue.main.async {
+            baseBottomDeltaMinutes = 0
+            proposedBottomDeltaMinutes = 0
+        }
     }
 }
