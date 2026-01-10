@@ -105,12 +105,11 @@ struct TimelineCardOnlyRow: View {
     }
     
     /// Clamp offset so card stays within 0:00 - 24:00 timeline bounds.
+    /// Uses TimeUtil.anchoredTime to normalize start time to startOfDay before calculating.
     private func clampOffsetToTimeline(_ offsetMinutes: Int) -> Int {
-        let calendar = Calendar.current
-        
-        // Get current time components of the card
-        let currentComponents = calendar.dateComponents([.hour, .minute], from: start)
-        let currentMinutesFromMidnight = (currentComponents.hour ?? 0) * 60 + (currentComponents.minute ?? 0)
+        // Normalize start time to startOfDay to get accurate minutes-from-midnight
+        let normalizedStart = TimeUtil.anchoredTime(start, to: startOfDay)
+        let currentMinutesFromMidnight = Int(normalizedStart.timeIntervalSince(startOfDay) / 60)
         
         // Calculate new position with offset
         let newStartMinutes = currentMinutesFromMidnight + offsetMinutes
@@ -135,13 +134,21 @@ struct TimelineCardOnlyRow: View {
         return proposedOffsetMinutes
     }
 
-    /// Proposed duration (as Double minutes) while resizing in Edit; enforces a minimum.
+    /// Proposed duration (as Double minutes) while resizing in Edit; enforces minimum and maximum bounds.
     private var visualDurationMinutesDouble: Double {
         guard isEditing else { return Double(durationMinutes) }
+        // Use visual start position (including drag offset) for accurate clamping
+        let normalizedStart = TimeUtil.anchoredTime(start, to: startOfDay)
+        let baseStartMinutesFromMidnight = Int(normalizedStart.timeIntervalSince(startOfDay) / 60)
+        let visualStartMinutesFromMidnight = baseStartMinutesFromMidnight + visualOffsetMinutes
+        
         let base = Double(durationMinutes + baseBottomDeltaMinutes)
         let live = Double(liveResizePoints / editMinuteHeight)
         let combined = base + live
-        return max(Double(minDurationMinutes), combined)
+        
+        // Clamp to minimum (5 minutes) and maximum (can't extend beyond 24:00)
+        let maxDuration = Double(1440 - visualStartMinutesFromMidnight)
+        return max(Double(minDurationMinutes), min(maxDuration, combined))
     }
     /// Integer minutes helper for date previews.
     private var visualDurationMinutes: Int { Int(visualDurationMinutesDouble.rounded(.towardZero)) }
@@ -332,19 +339,33 @@ struct TimelineCardOnlyRow: View {
                 var tx = Transaction(); tx.disablesAnimations = true
                 withTransaction(tx) {
                     isInteracting = true
-                    // Continuous live growth in points; clamp so duration never drops below min
-                    let baseMins = durationMinutes + baseBottomDeltaMinutes
+                    // Use visual start position (including drag offset) for accurate clamping
+                    let normalizedStart = TimeUtil.anchoredTime(start, to: startOfDay)
+                    let baseStartMinutesFromMidnight = Int(normalizedStart.timeIntervalSince(startOfDay) / 60)
+                    let visualStartMinutesFromMidnight = baseStartMinutesFromMidnight + visualOffsetMinutes
+                    
+                    // Calculate potential new duration (convert to Double for calculations)
+                    let baseMins = Double(durationMinutes + baseBottomDeltaMinutes)
                     let liveMins = Double(value.translation.height / editMinuteHeight)
-                    let minLiveMins = Double(minDurationMinutes - baseMins) // negative or zero
-                    let clampedLiveMins = max(minLiveMins, liveMins)
+                    
+                    // Clamp: minimum duration (5 minutes) and maximum end time (24:00 = 1440 minutes)
+                    let minLiveMins = Double(minDurationMinutes) - baseMins // negative or zero
+                    let maxLiveMins = Double(1440 - visualStartMinutesFromMidnight) - baseMins // can't exceed 24:00
+                    let clampedLiveMins = max(minLiveMins, min(maxLiveMins, liveMins))
                     liveResizePoints = CGFloat(clampedLiveMins) * editMinuteHeight
                 }
             }
             .onEnded { value in
                 guard isEditing else { return }
+                // Use visual start position (including drag offset) for accurate clamping
+                let normalizedStart = TimeUtil.anchoredTime(start, to: startOfDay)
+                let baseStartMinutesFromMidnight = Int(normalizedStart.timeIntervalSince(startOfDay) / 60)
+                let visualStartMinutesFromMidnight = baseStartMinutesFromMidnight + visualOffsetMinutes
+                
                 let snap = snapToMinutes(value.translation.height)
                 let minCombined = -(durationMinutes - minDurationMinutes)
-                baseBottomDeltaMinutes = max(minCombined, baseBottomDeltaMinutes + snap)
+                let maxCombined = 1440 - visualStartMinutesFromMidnight - durationMinutes
+                baseBottomDeltaMinutes = max(minCombined, min(maxCombined, baseBottomDeltaMinutes + snap))
                 proposedBottomDeltaMinutes = baseBottomDeltaMinutes
                 liveResizePoints = 0
                 isInteracting = false
@@ -376,7 +397,10 @@ struct TimelineCardOnlyRow: View {
     // MARK: - Persistence
     
     /// Persist move (time offset) changes to the ScheduledPlan model
+    /// DISABLED: Does not persist for debugging
     private func persistMoveChange(offsetMinutes: Int) {
+        return  // DISABLED: No persistence
+        /* DISABLED
         guard offsetMinutes != 0 else { return }
         
         // Calculate new start time
@@ -397,10 +421,14 @@ struct TimelineCardOnlyRow: View {
             baseOffsetMinutes = 0
             proposedOffsetMinutes = 0
         }
+        */
     }
     
     /// Persist resize (duration) changes to the ScheduledPlan model
+    /// DISABLED: Does not persist for debugging
     private func persistResizeChange(durationDeltaMinutes: Int) {
+        return  // DISABLED: No persistence
+        /* DISABLED
         guard durationDeltaMinutes != 0 else { return }
         
         // Calculate new duration
@@ -418,5 +446,6 @@ struct TimelineCardOnlyRow: View {
             baseBottomDeltaMinutes = 0
             proposedBottomDeltaMinutes = 0
         }
+        */
     }
 }
